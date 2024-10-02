@@ -1,8 +1,10 @@
 """Summarize messages sent by a user during a period of time and GitHub commits."""
 
+import os
 import getpass
 from datetime import datetime, timezone, tzinfo
 from typing import Generator, TypedDict, List
+from dotenv import load_dotenv
 
 from webexpythonsdk import WebexAPI
 from webexpythonsdk.models.immutable import Room, Message
@@ -26,6 +28,17 @@ class CommitData(TypedDict):
     repo: str
     message: str
     sha: str
+
+
+ORGANIZATIONS_TO_IGNORE = [
+    "AS-Community",
+    "besaccess",
+    "cx-usps-auto",
+    "SVS-DELIVERY",
+    "pyATS",
+    "netascode",
+    "CX-CATL",
+]
 
 
 def get_message_time(message: Message, local_tz: tzinfo) -> datetime:
@@ -137,12 +150,23 @@ def authenticate_github(token: str, base_url: str) -> Github:
 
 
 def get_github_commits(
-    gh: Github, date: datetime, local_tz: tzinfo
+    gh: Github,
+    date: datetime,
+    local_tz: tzinfo,
+    organizations_to_ignore: list[str] = [],
 ) -> List[CommitData]:
     """Get commits made by the authenticated user on a specific date."""
     commits: List[CommitData] = []
     for repo in gh.get_user().get_repos():
-        print(f"Fetching commits from repository: {repo.name}")
+        if repo.owner.login in organizations_to_ignore:
+            # print(
+            #     f"Skipping repository: {repo.name} in organization: {repo.owner.login}"
+            # )
+            continue
+        else:
+            print(
+                f"Fetching commits from repository: {repo.name} in organization: {repo.owner.login}"
+            )
         try:
             for commit in repo.get_commits(author=gh.get_user().login):
                 commit_time = commit.commit.author.date.replace(
@@ -167,13 +191,19 @@ def get_github_commits(
 
 # Main function
 def main() -> None:
+    # Load environment variables from .env file
+    load_dotenv()
+
     user_email = input("Enter your Cisco email: ")
     print("Enter your Webex access token by fetching it from the link below:")
     print("https://developer.webex.com/docs/getting-started")
     webex_token = getpass.getpass("Enter your Webex access token: ")
 
-    print("Enter your GitHub Enterprise personal access token:")
-    github_token = getpass.getpass("Enter your GitHub Enterprise PAT: ")
+    # Try to get GitHub PAT from .env file first
+    github_token = os.getenv("GITHUB_PAT")
+    if not github_token:
+        print("GitHub PAT not found in .env file.")
+        github_token = getpass.getpass("Enter your GitHub Enterprise PAT: ")
 
     # Select the GitHub Enterprise instance to use from a list of known
     # instances
@@ -182,14 +212,21 @@ def main() -> None:
         "https://wwwin-github.cisco.com/api/v3",
     ]
 
-    # Display known GitHub Enterprise instances to user
-    print("Known GitHub Enterprise instances:")
-    for i, instance in enumerate(known_github_instances, start=1):
-        print(f"  {i}: {instance}")
-    selection = int(
-        input("Enter the number of the GitHub Enterprise instance you want to use: ")
-    )
-    github_base_url = known_github_instances[selection - 1]
+    # Try to get GitHub base URL from .env file first
+    github_base_url = os.getenv("GITHUB_BASE_URL")
+    if not github_base_url:
+        # Display known GitHub Enterprise instances to user
+        print("Known GitHub Enterprise instances:")
+        for i, instance in enumerate(known_github_instances, start=1):
+            print(f"  {i}: {instance}")
+        selection = int(
+            input(
+                "Enter the number of the GitHub Enterprise instance you want to use: "
+            )
+        )
+        github_base_url = known_github_instances[selection - 1]
+    else:
+        print(f"Using GitHub base URL from .env file: {github_base_url}")
 
     date_str = input("Enter the date (YYYY-MM-DD): ")
     try:
@@ -223,7 +260,9 @@ def main() -> None:
     # Sort messages by time from earliest to latest
     message_data.sort(key=lambda x: x["time"])
 
-    commit_data = get_github_commits(github_api, date, local_tz)
+    commit_data = get_github_commits(
+        github_api, date, local_tz, ORGANIZATIONS_TO_IGNORE
+    )
     commit_data.sort(key=lambda x: x["time"])
 
     print(

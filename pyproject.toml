@@ -9,6 +9,7 @@ readme = "README.md"
 python = "^3.12"
 webexpythonsdk = "^2.0.1"
 pygithub = "^2.4.0"
+python-dotenv = "^1.0.1"
 
 
 [build-system]
