@@ -1,22 +1,20 @@
 """Summarize messages sent by a user during a period of time and GitHub commits."""
 
 import getpass
-import os
 from datetime import datetime, timezone
 
-from dotenv import load_dotenv
 from rich.prompt import Prompt
-from webexpythonsdk import WebexAPI
 
+from .config import AppConfig, get_known_github_instances, load_config_from_env
 from .console_ui import console, display_results, display_welcome_panel
-from .github_utils import authenticate_github, get_github_commits
-from .webex import get_messages, get_rooms_with_activity
+from .github_utils import GitHubClient
+from .webex import WebexClient
 
 
-def main() -> None:
-    # Load environment variables from .env file
-    load_dotenv()
-
+def get_user_config() -> AppConfig:
+    """Get user configuration through prompts."""
+    env_config = load_config_from_env()
+    
     display_welcome_panel()
 
     user_email = Prompt.ask("Enter your Cisco email")
@@ -24,17 +22,14 @@ def main() -> None:
     console.print("[link=https://developer.webex.com/docs/getting-started]https://developer.webex.com/docs/getting-started[/link]")
     webex_token = getpass.getpass("Enter your Webex access token: ")
 
-    github_token = os.getenv("GITHUB_PAT")
+    github_token = env_config.get("github_token")
     if not github_token:
         console.print("[yellow]GitHub PAT not found in .env file.[/]")
         github_token = getpass.getpass("Enter your GitHub Enterprise PAT: ")
 
-    known_github_instances = [
-        "https://github.com/api/v3",
-        "https://wwwin-github.cisco.com/api/v3",
-    ]
-
-    github_base_url = os.getenv("GITHUB_BASE_URL")
+    known_github_instances = get_known_github_instances()
+    github_base_url = env_config.get("github_base_url")
+    
     if not github_base_url:
         console.print("[bold]Known GitHub Enterprise instances:[/]")
         for i, instance in enumerate(known_github_instances, start=1):
@@ -54,38 +49,53 @@ def main() -> None:
         date = datetime.strptime(date_str, "%Y-%m-%d")
     except ValueError:
         console.print("[red]Invalid date format. Please enter the date in YYYY-MM-DD format.[/]")
-        return
+        raise ValueError("Invalid date format")
 
+    return AppConfig(
+        webex_token=webex_token,
+        github_token=github_token,
+        github_base_url=github_base_url,
+        user_email=user_email,
+        target_date=date,
+    )
+
+
+def run_app(config: AppConfig) -> None:
+    """Run the application with the given configuration."""
     local_tz = datetime.now().astimezone().tzinfo
     if local_tz is None:
         console.print("[yellow]Unable to identify local timezone. Defaulting to UTC.[/]")
         local_tz = timezone.utc
 
     with console.status("[bold green]Connecting to APIs...[/]") as status:
-        webex_client = WebexAPI(access_token=webex_token)
-        github_api = authenticate_github(github_token, github_base_url)
+        webex_client = WebexClient(config)
+        github_client = GitHubClient(config)
 
-        me = webex_client.people.me()
+        me = webex_client.get_me()
         console.log(f"Connected as [bold green]{me.displayName}[/]")
 
-    console.print(f"Looking for activity on [bold]{date.date()}[/]...")
+    console.print(f"Looking for activity on [bold]{config.target_date.date()}[/]...")
 
-    rooms = get_rooms_with_activity(webex_client, date, local_tz)
-    console.print(f"Identified [bold green]{len(rooms)}[/] rooms with activity on {date.date()}.")
-
-    message_data = []
-    for room in rooms:
-        messages = get_messages(webex_client, date, user_email, room, local_tz)
-        message_data.extend(messages)
-
-    message_data.sort(key=lambda x: x["time"])
-
-    commit_data = get_github_commits(
-        github_api, date, local_tz
+    message_data = webex_client.get_activity(config.target_date, local_tz)
+    commit_data = github_client.get_commits(config.target_date, local_tz)
+    
+    display_results(
+        message_data, 
+        commit_data, 
+        me.displayName, 
+        str(config.target_date.date())
     )
-    commit_data.sort(key=lambda x: x["time"])
 
-    display_results(message_data, commit_data, me.displayName, str(date.date()))
+
+def main() -> None:
+    """Entry point for the application."""
+    try:
+        config = get_user_config()
+        run_app(config)
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Operation cancelled by user.[/]")
+    except Exception as e:
+        console.print(f"[bold red]Error: {str(e)}[/]")
 
 
 if __name__ == "__main__":

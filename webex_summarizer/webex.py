@@ -1,7 +1,7 @@
 """Webex API interaction functions."""
 
 from datetime import datetime, timezone, tzinfo
-from typing import Generator
+from typing import Generator, List, Optional
 
 from rich.console import Console
 from rich.progress import (
@@ -14,10 +14,39 @@ from rich.progress import (
 from webexpythonsdk import WebexAPI
 from webexpythonsdk.models.immutable import Message, Room
 
+from .config import AppConfig
 from .types import MessageData
 
 # Initialize Rich console
 console = Console()
+
+
+class WebexClient:
+    """Wrapper around Webex API client."""
+    
+    def __init__(self, config: AppConfig, client: Optional[WebexAPI] = None):
+        """Initialize with configuration."""
+        self.config = config
+        self._client = client or WebexAPI(access_token=config.webex_token)
+        self._me = None
+        
+    def get_me(self):
+        """Get user information."""
+        if not self._me:
+            self._me = self._client.people.me()
+        return self._me
+    
+    def get_activity(self, date: datetime, local_tz: tzinfo) -> List[MessageData]:
+        """Get all activity for the specified date."""
+        rooms = get_rooms_with_activity(self._client, date, local_tz)
+        
+        message_data = []
+        for room in rooms:
+            messages = get_messages(self._client, date, self.config.user_email, room, local_tz)
+            message_data.extend(messages)
+            
+        message_data.sort(key=lambda x: x["time"])
+        return message_data
 
 
 def get_message_time(message: Message, local_tz: tzinfo) -> datetime:

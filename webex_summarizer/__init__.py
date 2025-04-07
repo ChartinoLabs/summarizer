@@ -1,1 +1,5 @@
-"""Uses the Webex API to return list of messages the user has sent in Webex spaces."""
+"""
+Webex and GitHub Summarizer.
+
+A tool to summarize your messages and commits across Webex and GitHub.
+"""

@@ -1,7 +1,7 @@
 """GitHub API interaction functions."""
 
 from datetime import datetime, timezone, tzinfo
-from typing import List
+from typing import List, Optional
 
 from github import Github
 from github.GithubException import GithubException
@@ -14,21 +14,36 @@ from rich.progress import (
     TimeElapsedColumn,
 )
 
+from .config import AppConfig
 from .types import CommitData
 
 # Initialize Rich console
 console = Console()
 
-# Default organizations to ignore
-ORGANIZATIONS_TO_IGNORE = [
-    "AS-Community",
-    "besaccess",
-    "cx-usps-auto",
-    "SVS-DELIVERY",
-    "pyATS",
-    "netascode",
-    "CX-CATL",
-]
+
+class GitHubClient:
+    """GitHub API client wrapper."""
+    
+    def __init__(self, config: AppConfig, client: Optional[Github] = None):
+        """Initialize the GitHub client."""
+        self.config = config
+        self._client = client or self._create_client()
+        
+    def _create_client(self) -> Github:
+        """Create a GitHub client instance."""
+        return Github(
+            base_url=self.config.github_base_url, 
+            login_or_token=self.config.github_token
+        )
+    
+    def get_commits(self, date: datetime, local_tz: tzinfo) -> List[CommitData]:
+        """Get commits made by the authenticated user on a specific date."""
+        return get_github_commits(
+            self._client, 
+            date, 
+            local_tz, 
+            self.config.organizations_to_ignore
+        )
 
 
 def authenticate_github(token: str, base_url: str) -> Github:
@@ -40,9 +55,12 @@ def get_github_commits(
     gh: Github,
     date: datetime,
     local_tz: tzinfo,
-    organizations_to_ignore: list[str] = ORGANIZATIONS_TO_IGNORE,
+    organizations_to_ignore: list[str] | None = None,
 ) -> List[CommitData]:
     """Get commits made by the authenticated user on a specific date."""
+    if organizations_to_ignore is None:
+        organizations_to_ignore = []
+        
     commits: List[CommitData] = []
 
     with Progress(
