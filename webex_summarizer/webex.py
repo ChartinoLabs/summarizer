@@ -40,7 +40,7 @@ class WebexClient:
         """Get all activity for the specified date."""
         rooms = get_rooms_with_activity(self._client, date, local_tz)
 
-        message_data = []
+        message_data: list[MessageData] = []
         for room in rooms:
             messages = get_messages(
                 self._client, date, self.config.user_email, room, local_tz
@@ -85,9 +85,17 @@ def get_rooms_with_activity(
                 roomId=room.id, max=100
             )
 
+            # Create a slice object to get only the first message
             first_message_slice_obj = slice(0, 1)
-            first_message_slice = messages[first_message_slice_obj]  # type: ignore
-            first_message = next(first_message_slice, None)
+            # Apply the slice to the generator. Ignore type checking here because
+            # WebexPythonSDK does not implement a true generator, but a
+            # generator-like object that supports iteration.
+            first_message_slice: Generator[Message, None, None] = messages[  # type: ignore
+                first_message_slice_obj
+            ]
+            # Get the first message from the slice or None if no messages exist
+            first_message = next(first_message_slice, None)  # type: ignore
+            # Skip this room if no messages were found
             if first_message is None:
                 console.log(f"No messages found in room: [yellow]{room.title}[/]")
                 continue

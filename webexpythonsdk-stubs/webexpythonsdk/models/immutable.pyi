@@ -5,7 +5,7 @@ class Message:
     roomId: str  # noqa: N803, N815
     personEmail: str  # noqa: N803, N815
     text: str
-    created: datetime
+    created: datetime | None
 
 class Person:
     id: str
