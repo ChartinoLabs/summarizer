@@ -51,3 +51,6 @@ convention = "google"
 
 [tool.ruff.lint.isort]
 combine-as-imports = true
+
+[tool.pyright]
+stubPath = "./webexpythonsdk-stubs"
