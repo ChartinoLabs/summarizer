@@ -11,6 +11,10 @@ dependencies = [
     "webexpythonsdk>=2.0.4",
 ]
 
+[project.urls]
+"Homepage" = "https://github.com/ChristopherJHart/webex-summarizer"
+"Bug Tracker" = "https://github.com/ChristopherJHart/webex-summarizer/issues"
+
 [project.optional-dependencies]
 dev = [
     "pre-commit>=4.2.0",
