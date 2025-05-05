@@ -1,7 +1,7 @@
 """Webex API interaction functions."""
 
-from datetime import datetime, timezone, tzinfo
-from typing import Generator, List, Optional
+from collections.abc import Generator
+from datetime import UTC, datetime, tzinfo
 
 from rich.console import Console
 from rich.progress import (
@@ -12,7 +12,7 @@ from rich.progress import (
     TimeElapsedColumn,
 )
 from webexpythonsdk import WebexAPI
-from webexpythonsdk.models.immutable import Message, Room
+from webexpythonsdk.models.immutable import Message, Person, Room
 
 from .config import AppConfig
 from .types import MessageData
@@ -23,28 +23,30 @@ console = Console()
 
 class WebexClient:
     """Wrapper around Webex API client."""
-    
-    def __init__(self, config: AppConfig, client: Optional[WebexAPI] = None):
+
+    def __init__(self, config: AppConfig, client: WebexAPI | None = None) -> None:
         """Initialize with configuration."""
         self.config = config
         self._client = client or WebexAPI(access_token=config.webex_token)
-        self._me = None
-        
-    def get_me(self):
+        self._me: Person | None = None
+
+    def get_me(self) -> Person:
         """Get user information."""
         if not self._me:
             self._me = self._client.people.me()
         return self._me
-    
-    def get_activity(self, date: datetime, local_tz: tzinfo) -> List[MessageData]:
+
+    def get_activity(self, date: datetime, local_tz: tzinfo) -> list[MessageData]:
         """Get all activity for the specified date."""
         rooms = get_rooms_with_activity(self._client, date, local_tz)
-        
+
         message_data = []
         for room in rooms:
-            messages = get_messages(self._client, date, self.config.user_email, room, local_tz)
+            messages = get_messages(
+                self._client, date, self.config.user_email, room, local_tz
+            )
             message_data.extend(messages)
-            
+
         message_data.sort(key=lambda x: x["time"])
         return message_data
 
@@ -52,7 +54,7 @@ class WebexClient:
 def get_message_time(message: Message, local_tz: tzinfo) -> datetime:
     """Get message time in local timezone."""
     message_time = datetime.strptime(str(message.created), "%Y-%m-%dT%H:%M:%S.%fZ")
-    message_time = message_time.replace(tzinfo=timezone.utc).astimezone(local_tz)
+    message_time = message_time.replace(tzinfo=UTC).astimezone(local_tz)
     return message_time
 
 
@@ -67,13 +69,15 @@ def get_rooms_with_activity(
         TextColumn("[bold blue]{task.description}"),
         BarColumn(),
         TimeElapsedColumn(),
-        console=console
+        console=console,
     ) as progress:
         fetch_task = progress.add_task("Fetching rooms...", total=None)
         rooms: Generator[Room, None, None] = client.rooms.list(
             max=250, sortBy="lastactivity"
         )
-        progress.update(fetch_task, description="Processing rooms", total=1.0, completed=0.5)
+        progress.update(
+            fetch_task, description="Processing rooms", total=1.0, completed=0.5
+        )
 
         for room in rooms:
             progress.update(fetch_task, description=f"Checking room: {room.title}")
@@ -89,17 +93,23 @@ def get_rooms_with_activity(
                 continue
 
             if first_message.created is None:
-                console.log(f"First message in room [yellow]{room.title}[/] has no creation time.")
+                console.log(
+                    f"First message in room [yellow]{room.title}[/] has no creation "
+                    "time."
+                )
                 continue
 
             first_message_time = get_message_time(first_message, local_tz)
             if first_message_time.date() < desired_date.date():
                 console.log(
-                    f"First message in room [yellow]{room.title}[/] is older than the date we are looking for."
+                    f"First message in room [yellow]{room.title}[/] is older than the "
+                    "date we are looking for."
                 )
                 break
             elif first_message_time.date() == desired_date.date():
-                console.log(f"First message in room [green]{room.title}[/] indicates activity")
+                console.log(
+                    f"First message in room [green]{room.title}[/] indicates activity"
+                )
                 rooms_with_activity.append(room)
                 continue
 
@@ -108,10 +118,12 @@ def get_rooms_with_activity(
                     continue
                 message_time = get_message_time(message, local_tz)
                 if message_time.date() == desired_date.date():
-                    console.log(f"Recent activity found in room: [green]{room.title}[/]")
                     console.log(
-                        f"[{message_time.strftime('%m-%d %H:%M:%S')}] ([cyan]{room.title}[/]) "
-                        f"{message.text}"
+                        f"Recent activity found in room: [green]{room.title}[/]"
+                    )
+                    console.log(
+                        f"[{message_time.strftime('%m-%d %H:%M:%S')}] "
+                        f"([cyan]{room.title}[/]) {message.text}"
                     )
                     rooms_with_activity.append(room)
                     break
@@ -133,9 +145,11 @@ def get_messages(
         SpinnerColumn(),
         TextColumn("[bold blue]{task.description}"),
         BarColumn(),
-        console=console
+        console=console,
     ) as progress:
-        task = progress.add_task(f"Fetching messages from [cyan]{room.title}[/]", total=None)
+        task = progress.add_task(
+            f"Fetching messages from [cyan]{room.title}[/]", total=None
+        )
 
         messages: Generator[Message, None, None] = client.messages.list(
             roomId=room.id, max=100
@@ -150,11 +164,16 @@ def get_messages(
                 if message.personEmail == user_email:
                     room = client.rooms.get(message.roomId)
                     filtered_messages.append(
-                        {"time": message_time, "space": room.title, "text": message.text}
+                        {
+                            "time": message_time,
+                            "space": room.title,
+                            "text": message.text,
+                        }
                     )
             elif message_time.date() < date.date():
                 console.log(
-                    f"Found [bold]{len(filtered_messages)}[/] relevant messages in [cyan]{room.title}[/]"
+                    f"Found [bold]{len(filtered_messages)}[/] relevant messages in "
+                    f"[cyan]{room.title}[/]"
                 )
                 break
 

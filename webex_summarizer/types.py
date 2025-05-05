@@ -10,12 +10,3 @@ class MessageData(TypedDict):
     time: datetime
     space: str
     text: str
-
-
-class CommitData(TypedDict):
-    """Commit data structure."""
-
-    time: datetime
-    repo: str
-    message: str
-    sha: str
