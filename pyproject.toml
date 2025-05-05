@@ -1,22 +1,20 @@
-[tool.poetry]
+[project]
 name = "webex-summarizer"
 version = "0.1.0"
-description = ""
+description = "Extracts Webex conversations you had that occurred during a particular day."
 authors = ["Christopher Hart <chart2@cisco.com>"]
 readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic-settings>=2.9.1",
+    "rich>=14.0.0",
+    "webexpythonsdk>=2.0.4",
+]
 
-[tool.poetry.dependencies]
-python = "^3.12"
-webexpythonsdk = "^2.0.1"
-pygithub = "^2.4.0"
-python-dotenv = "^1.0.1"
-rich = "^14.0.0"
-
-
-[tool.poetry.group.dev.dependencies]
-pytest = "^8.3.5"
-pytest-asyncio = "^0.26.0"
-
-[build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+[project.optional-dependencies]
+dev = [
+    "pre-commit>=4.2.0",
+    "pytest>=8.3.5",
+    "pytest-asyncio>=0.26.0",
+    "ruff>=0.11.8",
+]
