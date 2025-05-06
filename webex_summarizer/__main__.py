@@ -3,6 +3,7 @@
 import getpass
 import traceback
 from datetime import UTC, datetime
+from typing import Literal, cast
 
 from dotenv import load_dotenv
 from rich.prompt import Prompt
@@ -34,10 +35,40 @@ def get_user_config() -> AppConfig:
         )
         raise ValueError("Invalid date format") from e
 
+    context_window_minutes = Prompt.ask(
+        "Enter context window in minutes", default="15", show_default=True
+    )
+    try:
+        context_window_minutes = int(context_window_minutes)
+    except ValueError:
+        context_window_minutes = 15
+
+    passive_participation = (
+        Prompt.ask(
+            "Include conversations where you only received messages? (y/n)",
+            default="n",
+            show_default=True,
+        )
+        .strip()
+        .lower()
+        == "y"
+    )
+
+    time_display_format = Prompt.ask(
+        "Time display format ('12h' or '24h')",
+        choices=["12h", "24h"],
+        default="12h",
+        show_default=True,
+    )
+    time_display_format = cast(Literal["12h", "24h"], time_display_format)
+
     return AppConfig(
         webex_token=webex_token,
         user_email=user_email,
         target_date=date,
+        context_window_minutes=context_window_minutes,
+        passive_participation=passive_participation,
+        time_display_format=time_display_format,
     )
 
 
