@@ -12,13 +12,28 @@ from rich.progress import (
     TimeElapsedColumn,
 )
 from webexpythonsdk import WebexAPI
-from webexpythonsdk.models.immutable import Message, Person, Room
+from webexpythonsdk.models.immutable import Message as SDKMessage, Person, Room
 
 from .config import AppConfig
-from .types import MessageData
+from .models import Message, SpaceType, User
 
 # Initialize Rich console
 console = Console()
+
+
+def sdk_person_to_user(person: Person) -> User:
+    """Convert a Webex API Person object to a User dataclass."""
+    return User(id=person.id, display_name=person.displayName)
+
+
+def get_space_type(room: Room) -> SpaceType:
+    """Get the type of a space from a Webex API Room object."""
+    if room.type == "direct":
+        return SpaceType.DM
+    elif room.type == "group":
+        return SpaceType.GROUP
+    else:
+        raise ValueError(f"Unknown space type: {room.type}")
 
 
 class WebexClient:
@@ -30,28 +45,28 @@ class WebexClient:
         self._client = client or WebexAPI(access_token=config.webex_token)
         self._me: Person | None = None
 
-    def get_me(self) -> Person:
-        """Get user information."""
+    def get_me(self) -> User:
+        """Get user information as a User dataclass."""
         if not self._me:
             self._me = self._client.people.me()
-        return self._me
+        return sdk_person_to_user(self._me)
 
-    def get_activity(self, date: datetime, local_tz: tzinfo) -> list[MessageData]:
-        """Get all activity for the specified date."""
+    def get_activity(self, date: datetime, local_tz: tzinfo) -> list[Message]:
+        """Get all activity for the specified date as a list of Message objects."""
         rooms = get_rooms_with_activity(self._client, date, local_tz)
 
-        message_data: list[MessageData] = []
+        messages: list[Message] = []
         for room in rooms:
-            messages = get_messages(
+            room_messages = get_messages(
                 self._client, date, self.config.user_email, room, local_tz
             )
-            message_data.extend(messages)
+            messages.extend(room_messages)
 
-        message_data.sort(key=lambda x: x["time"])
-        return message_data
+        messages.sort(key=lambda x: x.timestamp)
+        return messages
 
 
-def get_message_time(message: Message, local_tz: tzinfo) -> datetime:
+def get_message_time(message: SDKMessage, local_tz: tzinfo) -> datetime:
     """Get message time in local timezone."""
     message_time = datetime.strptime(str(message.created), "%Y-%m-%dT%H:%M:%S.%fZ")
     message_time = message_time.replace(tzinfo=UTC).astimezone(local_tz)
@@ -81,21 +96,15 @@ def get_rooms_with_activity(
 
         for room in rooms:
             progress.update(fetch_task, description=f"Checking room: {room.title}")
-            messages: Generator[Message, None, None] = client.messages.list(
+            messages: Generator[SDKMessage, None, None] = client.messages.list(
                 roomId=room.id, max=100
             )
 
-            # Create a slice object to get only the first message
             first_message_slice_obj = slice(0, 1)
-            # Apply the slice to the generator. Ignore type checking here because
-            # WebexPythonSDK does not implement a true generator, but a
-            # generator-like object that supports iteration.
-            first_message_slice: Generator[Message, None, None] = messages[  # type: ignore
+            first_message_slice: Generator[SDKMessage, None, None] = messages[  # type: ignore
                 first_message_slice_obj
             ]
-            # Get the first message from the slice or None if no messages exist
             first_message = next(first_message_slice, None)  # type: ignore
-            # Skip this room if no messages were found
             if first_message is None:
                 console.log(f"No messages found in room: [yellow]{room.title}[/]")
                 continue
@@ -145,9 +154,9 @@ def get_rooms_with_activity(
 
 def get_messages(
     client: WebexAPI, date: datetime, user_email: str, room: Room, local_tz: tzinfo
-) -> list[MessageData]:
-    """Get messages sent by user on a specific date."""
-    filtered_messages: list[MessageData] = []
+) -> list[Message]:
+    """Get messages sent by user on a specific date as Message dataclasses."""
+    filtered_messages: list[Message] = []
 
     with Progress(
         SpinnerColumn(),
@@ -159,24 +168,32 @@ def get_messages(
             f"Fetching messages from [cyan]{room.title}[/]", total=None
         )
 
-        messages: Generator[Message, None, None] = client.messages.list(
+        messages: Generator[SDKMessage, None, None] = client.messages.list(
             roomId=room.id, max=100
         )
 
-        for message in messages:
-            if message.created is None:
+        for sdk_message in messages:
+            if sdk_message.created is None:
                 continue
 
-            message_time = get_message_time(message, local_tz)
+            message_time = get_message_time(sdk_message, local_tz)
             if message_time.date() == date.date():
-                if message.personEmail == user_email:
-                    room = client.rooms.get(message.roomId)
+                if sdk_message.personEmail == user_email:
+                    sender = User(
+                        id=sdk_message.personId,
+                        display_name=sdk_message.personId,
+                    )
+                    recipients: list[User] = []  # Not available from SDK directly
                     filtered_messages.append(
-                        {
-                            "time": message_time,
-                            "space": room.title,
-                            "text": message.text,
-                        }
+                        Message(
+                            id=sdk_message.id,
+                            space_id=room.id,
+                            space_type=get_space_type(room),
+                            sender=sender,
+                            recipients=recipients,
+                            timestamp=message_time,
+                            content=sdk_message.text or "",
+                        )
                     )
             elif message_time.date() < date.date():
                 console.log(

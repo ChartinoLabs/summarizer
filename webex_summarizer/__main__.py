@@ -1,6 +1,7 @@
 """Summarize messages sent by a user during a period of time and GitHub commits."""
 
 import getpass
+import traceback
 from datetime import UTC, datetime
 
 from dotenv import load_dotenv
@@ -53,13 +54,13 @@ def run_app(config: AppConfig) -> None:
         webex_client = WebexClient(config)
 
         me = webex_client.get_me()
-        console.log(f"Connected as [bold green]{me.displayName}[/]")
+        console.log(f"Connected as [bold green]{me.display_name}[/]")
 
     console.print(f"Looking for activity on [bold]{config.target_date.date()}[/]...")
 
     message_data = webex_client.get_activity(config.target_date, local_tz)
 
-    display_results(message_data, me.displayName, str(config.target_date.date()))
+    display_results(message_data, me.display_name, str(config.target_date.date()))
 
 
 def main() -> None:
@@ -71,6 +72,8 @@ def main() -> None:
         console.print("\n[yellow]Operation cancelled by user.[/]")
     except Exception as e:
         console.print(f"[bold red]Error: {str(e)}[/]")
+        console.print("[bold red]Traceback:[/]")
+        console.print(traceback.format_exc())
 
 
 if __name__ == "__main__":
