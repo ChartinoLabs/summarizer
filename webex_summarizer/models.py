@@ -5,16 +5,6 @@ from datetime import datetime
 from enum import Enum
 
 
-class MessageType(Enum):
-    """The type of message."""
-
-    TEXT = "text"
-    FILE = "file"
-    IMAGE = "image"
-    REACTION = "reaction"
-    OTHER = "other"
-
-
 class SpaceType(Enum):
     """The type of space."""
 
@@ -50,7 +40,6 @@ class Message:
     recipients: list[User]
     timestamp: datetime
     content: str
-    message_type: MessageType
     thread: Thread | None = None
     conversation_id: str | None = None
 
