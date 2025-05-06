@@ -13,6 +13,7 @@ class WebexAPI:
 
 class PeopleAPI:
     def me(self) -> Person: ...
+    def get(self, personId: str) -> Person: ...  # noqa: N803
 
 class RoomsAPI:
     def list(

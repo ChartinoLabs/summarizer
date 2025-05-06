@@ -36,6 +36,7 @@ class Message:
     id: str
     space_id: str
     space_type: SpaceType
+    space_name: str
     sender: User
     recipients: list[User]
     timestamp: datetime

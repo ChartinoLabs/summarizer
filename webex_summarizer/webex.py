@@ -179,16 +179,16 @@ def get_messages(
             message_time = get_message_time(sdk_message, local_tz)
             if message_time.date() == date.date():
                 if sdk_message.personEmail == user_email:
-                    sender = User(
-                        id=sdk_message.personId,
-                        display_name=sdk_message.personId,
-                    )
+                    # Get sender details from Webex API
+                    sdk_sender = client.people.get(sdk_message.personId)
+                    sender = sdk_person_to_user(sdk_sender)
                     recipients: list[User] = []  # Not available from SDK directly
                     filtered_messages.append(
                         Message(
                             id=sdk_message.id,
                             space_id=room.id,
                             space_type=get_space_type(room),
+                            space_name=room.title,
                             sender=sender,
                             recipients=recipients,
                             timestamp=message_time,

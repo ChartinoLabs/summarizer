@@ -4,7 +4,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from .models import Message, SpaceType
+from .models import Message
 
 console = Console()
 
@@ -35,15 +35,10 @@ def display_results(messages: list[Message], user_name: str, date_str: str) -> N
         table.add_column("Message", style="white", no_wrap=False, overflow="fold")
 
         for message in messages:
-            if message.space_type == SpaceType.DM:
-                space_name = "DM"
-            else:
-                space_name = message.space_id
-
             table.add_row(
                 message.timestamp.strftime("%H:%M:%S"),
                 message.sender.display_name,
-                space_name,
+                message.space_name,
                 message.content,
             )
 
