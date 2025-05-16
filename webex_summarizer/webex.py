@@ -155,8 +155,13 @@ def get_rooms_with_activity(
 def get_messages(
     client: WebexAPI, date: datetime, user_email: str, room: Room, local_tz: tzinfo
 ) -> list[Message]:
-    """Get messages sent by user on a specific date as Message dataclasses."""
-    filtered_messages: list[Message] = []
+    """Get all messages for a specific date in a room.
+
+    Only returns messages if the user sent at least one message in that room on that
+    date.
+    """
+    all_messages: list[Message] = []
+    user_sent = False
 
     with Progress(
         SpinnerColumn(),
@@ -178,30 +183,30 @@ def get_messages(
 
             message_time = get_message_time(sdk_message, local_tz)
             if message_time.date() == date.date():
-                if sdk_message.personEmail == user_email:
-                    # Get sender details from Webex API
-                    sdk_sender = client.people.get(sdk_message.personId)
-                    sender = sdk_person_to_user(sdk_sender)
-                    recipients: list[User] = []  # Not available from SDK directly
-                    filtered_messages.append(
-                        Message(
-                            id=sdk_message.id,
-                            space_id=room.id,
-                            space_type=get_space_type(room),
-                            space_name=room.title,
-                            sender=sender,
-                            recipients=recipients,
-                            timestamp=message_time,
-                            content=sdk_message.text or "",
-                        )
-                    )
-            elif message_time.date() < date.date():
-                console.log(
-                    f"Found [bold]{len(filtered_messages)}[/] relevant messages in "
-                    f"[cyan]{room.title}[/]"
+                sdk_sender = client.people.get(sdk_message.personId)
+                sender = sdk_person_to_user(sdk_sender)
+                recipients: list[User] = []  # Not available from SDK directly
+                msg = Message(
+                    id=sdk_message.id,
+                    space_id=room.id,
+                    space_type=get_space_type(room),
+                    space_name=room.title,
+                    sender=sender,
+                    recipients=recipients,
+                    timestamp=message_time,
+                    content=sdk_message.text or "",
                 )
+                all_messages.append(msg)
+                if sdk_message.personEmail == user_email:
+                    user_sent = True
+            elif message_time.date() < date.date():
                 break
 
         progress.update(task, completed=1.0)
 
-    return filtered_messages
+    # Only return messages if the user sent at least one message in this room
+    # on this date
+    if user_sent:
+        return all_messages
+    else:
+        return []
