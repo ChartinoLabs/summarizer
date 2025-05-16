@@ -2,14 +2,15 @@
 
 import getpass
 import traceback
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Literal, cast
 
 from dotenv import load_dotenv
 from rich.prompt import Prompt
 
 from .config import AppConfig
-from .console_ui import console, display_results, display_welcome_panel
+from .console_ui import console, display_conversations, display_welcome_panel
+from .grouping import group_all_conversations
 from .webex import WebexClient
 
 
@@ -91,7 +92,19 @@ def run_app(config: AppConfig) -> None:
 
     message_data = webex_client.get_activity(config.target_date, local_tz)
 
-    display_results(message_data, me.display_name, str(config.target_date.date()))
+    # Conversation grouping integration
+    context_window = timedelta(minutes=config.context_window_minutes)
+    conversations = group_all_conversations(
+        message_data,
+        context_window,
+        include_passive=config.passive_participation,
+    )
+
+    # Improved conversation reporting
+    display_conversations(conversations, time_display_format=config.time_display_format)
+
+    # Old message display (can be removed or replaced later)
+    # display_results(message_data, me.display_name, str(config.target_date.date()))
 
 
 def main() -> None:
