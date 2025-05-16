@@ -94,9 +94,11 @@ def run_app(config: AppConfig) -> None:
 
     # Conversation grouping integration
     context_window = timedelta(minutes=config.context_window_minutes)
+    user_id = me.id
     conversations = group_all_conversations(
         message_data,
         context_window,
+        user_id,
         include_passive=config.passive_participation,
     )
 

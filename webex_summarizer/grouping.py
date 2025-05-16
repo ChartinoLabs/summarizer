@@ -1,22 +1,35 @@
 """Grouping logic for messages."""
 
+import re
 from datetime import timedelta
 
 from .models import Conversation, Message, SpaceType
 
 
+def slugify(value: str) -> str:
+    """Convert a string to a slug suitable for IDs."""
+    value = value.lower()
+    value = re.sub(r"[^a-z0-9]+", "-", value)
+    value = re.sub(r"-+", "-", value)
+    return value.strip("-")
+
+
 def group_dm_conversations(
-    messages: list[Message], context_window: timedelta, include_passive: bool = False
+    messages: list[Message],
+    context_window: timedelta,
+    user_id: str,
+    include_passive: bool = False,
 ) -> list[Conversation]:
     """Group messages in DM space into conversations based on time context window.
 
     Only includes conversations where the authenticated user sent at least one message,
     unless include_passive is True.
+    The slug for the conversation ID is always the other participant (not the
+    authenticated user).
     """
     if not messages:
         return []
 
-    # Group messages by space_id first
     from collections import defaultdict
 
     messages_by_space: dict[str, list[Message]] = defaultdict(list)
@@ -35,9 +48,7 @@ def group_dm_conversations(
                 continue
             # Only start a conversation window if the user sent the message, or
             # if passive is enabled
-            is_sent_by_user = (
-                msg.sender.id == space_messages[0].sender.id
-            )  # Assume first sender is user
+            is_sent_by_user = msg.sender.id == user_id
             if not is_sent_by_user and not include_passive:
                 continue
             window_start = msg.timestamp - context_window
@@ -54,8 +65,15 @@ def group_dm_conversations(
                     break
             # Build conversation participants
             participants = {m.sender.id: m.sender for m in convo_msgs}
+            # Always select the other participant (not the authenticated user)
+            other_participant = next(
+                (p for p in participants.values() if p.id != user_id), None
+            )
+            slug = slugify(
+                other_participant.display_name if other_participant else "unknown"
+            )
             conversation = Conversation(
-                id=f"dm-{conversation_id_counter}",
+                id=f"dm-{slug}-{conversation_id_counter}",
                 space_id=msg.space_id,
                 space_type=msg.space_type,
                 participants=list(participants.values()),
@@ -109,8 +127,10 @@ def _create_thread_conversations(
         if original_post and original_post not in msgs:
             msgs.insert(0, original_post)
         participants = {m.sender.id: m.sender for m in msgs}
+        # Use space_name for group slug
+        slug = slugify(msgs[0].space_name)
         conversation = Conversation(
-            id=f"group-thread-{conversation_id_counter}",
+            id=f"group-thread-{slug}-{conversation_id_counter}",
             space_id=msgs[0].space_id,
             space_type=msgs[0].space_type,
             participants=list(participants.values()),
@@ -159,8 +179,9 @@ def _group_non_threaded_messages(
             elif m2.timestamp > window_end:
                 break
         participants = {m.sender.id: m.sender for m in convo_msgs}
+        slug = slugify(msg.space_name)
         conversation = Conversation(
-            id=f"group-nonthread-{conversation_id_counter}",
+            id=f"group-nonthread-{slug}-{conversation_id_counter}",
             space_id=msg.space_id,
             space_type=msg.space_type,
             participants=list(participants.values()),
@@ -214,7 +235,10 @@ def group_group_conversations(
 
 
 def group_all_conversations(
-    messages: list[Message], context_window: timedelta, include_passive: bool = False
+    messages: list[Message],
+    context_window: timedelta,
+    user_id: str,
+    include_passive: bool = False,
 ) -> list[Conversation]:
     """Group all messages (DM and group spaces) into conversations.
 
@@ -227,7 +251,9 @@ def group_all_conversations(
     conversations: list[Conversation] = []
     if dms:
         conversations.extend(
-            group_dm_conversations(dms, context_window, include_passive=include_passive)
+            group_dm_conversations(
+                dms, context_window, user_id, include_passive=include_passive
+            )
         )
     if groups:
         conversations.extend(group_group_conversations(groups, context_window))
