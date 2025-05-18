@@ -1,25 +1,13 @@
-"""Summarize messages sent by a user during a period of time and GitHub commits."""
+"""Contains core orchestration logic for the application."""
 
-# DEPRECATED: The Typer CLI (cli.py) is now the preferred entry point for this
-# application. This module is retained for legacy/manual use only and will be
-# removed in a future release.
-
-import traceback
 from datetime import UTC, datetime, timedelta
 
 from webexpythonsdk.exceptions import ApiError
 
-from .config import AppConfig
-from .console_ui import console, display_conversations
-from .grouping import group_all_conversations
-from .webex import WebexClient
-
-
-def get_user_config() -> AppConfig:
-    """Get user configuration through prompts (deprecated, replaced by Typer CLI)."""
-    raise NotImplementedError(
-        "Prompt-based config is now handled by Typer CLI. Use cli.py."
-    )
+from webex_summarizer.config import AppConfig
+from webex_summarizer.console_ui import console, display_conversations
+from webex_summarizer.grouping import group_all_conversations
+from webex_summarizer.webex import WebexClient
 
 
 def run_app(config: AppConfig) -> None:
@@ -73,23 +61,3 @@ def run_app(config: AppConfig) -> None:
 
     # Improved conversation reporting
     display_conversations(conversations, time_display_format=config.time_display_format)
-
-    # Old message display (can be removed or replaced later)
-    # display_results(message_data, me.display_name, str(config.target_date.date()))
-
-
-def main() -> None:
-    """Entry point for the application."""
-    try:
-        config = get_user_config()
-        run_app(config)
-    except KeyboardInterrupt:
-        console.print("\n[yellow]Operation cancelled by user.[/]")
-    except Exception as e:
-        console.print(f"[bold red]Error: {str(e)}[/]")
-        console.print("[bold red]Traceback:[/]")
-        console.print(traceback.format_exc())
-
-
-if __name__ == "__main__":
-    main()
