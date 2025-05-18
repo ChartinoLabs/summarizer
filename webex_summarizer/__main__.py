@@ -7,6 +7,7 @@ from typing import Literal, cast
 
 from dotenv import load_dotenv
 from rich.prompt import Prompt
+from webexpythonsdk.exceptions import ApiError
 
 from .config import AppConfig
 from .console_ui import console, display_conversations, display_welcome_panel
@@ -95,8 +96,26 @@ def run_app(config: AppConfig) -> None:
 
     with console.status("[bold green]Connecting to APIs...[/]"):
         webex_client = WebexClient(config)
-
-        me = webex_client.get_me()
+        try:
+            me = webex_client.get_me()
+        except ApiError as e:
+            if "401" in str(e):
+                console.print(
+                    "\n[bold red]Error: The provided Webex API token is invalid.[/]"
+                )
+                console.print(
+                    "[yellow]This may be because your token has expired or was copied "
+                    "incorrectly from the Webex website.[/]"
+                )
+                console.print(
+                    "[yellow]Please visit "
+                    "[link=https://developer.webex.com/docs/getting-started]"
+                    "https://developer.webex.com/docs/getting-started[/link] "
+                    "to obtain a new token and try again.[/]"
+                )
+                return
+            else:
+                raise
         console.log(f"Connected as [bold green]{me.display_name}[/]")
 
     console.print(f"Looking for activity on [bold]{config.target_date.date()}[/]...")
