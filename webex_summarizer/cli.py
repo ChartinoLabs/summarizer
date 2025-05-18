@@ -40,20 +40,16 @@ def main(
         str, typer.Option(..., help="Date in YYYY-MM-DD format", metavar="YYYY-MM-DD")
     ],
     context_window_minutes: Annotated[
-        int, typer.Option(15, help="Context window in minutes")
+        int, typer.Option(help="Context window in minutes")
     ] = 15,
     passive_participation: Annotated[
         bool,
-        typer.Option(
-            False, help="Include conversations where you only received messages?"
-        ),
+        typer.Option(help="Include conversations where you only received messages?"),
     ] = False,
     time_display_format: Annotated[
         TimeDisplayFormat, typer.Option(help="Time display format ('12h' or '24h')")
     ] = TimeDisplayFormat.h12,
-    room_chunk_size: Annotated[
-        int, typer.Option(50, help="Room fetch chunk size")
-    ] = 50,
+    room_chunk_size: Annotated[int, typer.Option(help="Room fetch chunk size")] = 50,
 ) -> None:
     """Webex Summarizer CLI (Typer config parsing demo)."""
     # Parse target_date

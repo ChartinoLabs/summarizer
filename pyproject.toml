@@ -2,7 +2,9 @@
 name = "webex-summarizer"
 version = "0.1.0"
 description = "Extracts Webex conversations you had that occurred during a particular day."
-authors = ["Christopher Hart <chart2@cisco.com>"]
+authors = [
+  { name = "Christopher Hart", email = "chart2@cisco.com" }
+]
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -24,6 +26,9 @@ dev = [
     "pytest-asyncio>=0.26.0",
     "ruff>=0.11.8",
 ]
+
+[project.scripts]
+summarizer = "webex_summarizer.cli:app"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
