@@ -20,3 +20,4 @@ class Room:
     id: str
     title: str
     type: RoomType
+    lastActivity: datetime | None  # noqa: N803, N815
