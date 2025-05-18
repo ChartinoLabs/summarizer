@@ -14,7 +14,6 @@ class AppConfig:
     webex_token: str
     user_email: str
     target_date: datetime
-    organizations_to_ignore: list[str] | None = None
     context_window_minutes: int = 15
     passive_participation: bool = False
     time_display_format: Literal["12h", "24h"] = "12h"

@@ -1,87 +1,24 @@
 """Summarize messages sent by a user during a period of time and GitHub commits."""
 
-import getpass
+# DEPRECATED: The Typer CLI (cli.py) is now the preferred entry point for this
+# application. This module is retained for legacy/manual use only and will be
+# removed in a future release.
+
 import traceback
 from datetime import UTC, datetime, timedelta
-from typing import Literal, cast
 
-from dotenv import load_dotenv
-from rich.prompt import Prompt
 from webexpythonsdk.exceptions import ApiError
 
 from .config import AppConfig
-from .console_ui import console, display_conversations, display_welcome_panel
+from .console_ui import console, display_conversations
 from .grouping import group_all_conversations
 from .webex import WebexClient
 
 
 def get_user_config() -> AppConfig:
-    """Get user configuration through prompts."""
-    load_dotenv()
-
-    display_welcome_panel()
-
-    user_email = Prompt.ask("Enter your Cisco email")
-    console.print("Enter your Webex access token by fetching it from the link below:")
-    console.print(
-        "[link=https://developer.webex.com/docs/getting-started]https://developer.webex.com/docs/getting-started[/link]"
-    )
-    webex_token = getpass.getpass("Enter your Webex access token: ")
-
-    date_str = Prompt.ask("Enter the date", default=datetime.now().strftime("%Y-%m-%d"))
-    try:
-        date = datetime.strptime(date_str, "%Y-%m-%d")
-    except ValueError as e:
-        console.print(
-            "[red]Invalid date format. Please enter the date in YYYY-MM-DD format.[/]"
-        )
-        raise ValueError("Invalid date format") from e
-
-    context_window_minutes = Prompt.ask(
-        "Enter context window in minutes", default="15", show_default=True
-    )
-    try:
-        context_window_minutes = int(context_window_minutes)
-    except ValueError:
-        context_window_minutes = 15
-
-    passive_participation = (
-        Prompt.ask(
-            "Include conversations where you only received messages? (y/n)",
-            default="n",
-            show_default=True,
-        )
-        .strip()
-        .lower()
-        == "y"
-    )
-
-    time_display_format = Prompt.ask(
-        "Time display format ('12h' or '24h')",
-        choices=["12h", "24h"],
-        default="12h",
-        show_default=True,
-    )
-    time_display_format = cast(Literal["12h", "24h"], time_display_format)
-
-    room_chunk_size = Prompt.ask(
-        "Room fetch chunk size (for performance tuning)",
-        default="50",
-        show_default=True,
-    )
-    try:
-        room_chunk_size = int(room_chunk_size)
-    except ValueError:
-        room_chunk_size = 50
-
-    return AppConfig(
-        webex_token=webex_token,
-        user_email=user_email,
-        target_date=date,
-        context_window_minutes=context_window_minutes,
-        passive_participation=passive_participation,
-        time_display_format=time_display_format,
-        room_chunk_size=room_chunk_size,
+    """Get user configuration through prompts (deprecated, replaced by Typer CLI)."""
+    raise NotImplementedError(
+        "Prompt-based config is now handled by Typer CLI. Use cli.py."
     )
 
 
