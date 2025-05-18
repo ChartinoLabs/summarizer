@@ -60,13 +60,25 @@ class WebexClient:
         rooms = self._client.rooms.list(
             max=self.config.room_chunk_size, sortBy="lastactivity"
         )
-        for room in rooms:
-            if room.lastActivity is None:
-                continue
-            if room.lastActivity.date() >= date.date():
-                active_rooms.append(room)
-            else:
-                break
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[bold blue]Scanning rooms for activity..."),
+            TextColumn("[green]Processed: {task.completed}"),
+            BarColumn(),
+            console=console,
+        ) as progress:
+            task = progress.add_task("Scanning rooms for activity...", total=None)
+            for room in rooms:
+                if room.lastActivity is None:
+                    progress.update(task, advance=1)
+                    continue
+                if room.lastActivity.date() >= date.date():
+                    active_rooms.append(room)
+                else:
+                    # Still count the room as processed
+                    progress.update(task, advance=1)
+                    break
+                progress.update(task, advance=1)
         return active_rooms
 
     def get_messages_for_rooms(
