@@ -54,26 +54,26 @@ class WebexClient:
             self._me = self._client.people.me()
         return sdk_person_to_user(self._me)
 
-    def get_activity(
-        self, date: datetime, local_tz: tzinfo, room_chunk_size: int = 50
-    ) -> list[Message]:
-        """Get all activity for the specified date as a list of Message objects."""
-        messages: list[Message] = []
-        client = self._client
-
-        # Stage 1: Filter rooms by lastActivity
+    def get_rooms_active_since_date(self, date: datetime) -> list[Room]:
+        """Get all rooms that have had activity since the given date."""
         active_rooms: list[Room] = []
-        rooms = client.rooms.list(max=room_chunk_size, sortBy="lastactivity")
+        rooms = self._client.rooms.list(
+            max=self.config.room_chunk_size, sortBy="lastactivity"
+        )
         for room in rooms:
             if room.lastActivity is None:
                 continue
-
             if room.lastActivity.date() >= date.date():
                 active_rooms.append(room)
             else:
                 break
+        return active_rooms
 
-        # Stage 2: Fetch messages for the date from filtered rooms
+    def get_messages_for_rooms(
+        self, rooms: list[Room], date: datetime, local_tz: tzinfo
+    ) -> list[Message]:
+        """Get all messages for the given rooms and date."""
+        messages: list[Message] = []
         with Progress(
             SpinnerColumn(),
             TextColumn("[bold blue]Fetching messages from active rooms..."),
@@ -82,19 +82,19 @@ class WebexClient:
             console=console,
         ) as progress:
             task = progress.add_task(
-                "Fetching messages from active rooms...", total=len(active_rooms)
+                "Fetching messages from rooms...", total=len(rooms)
             )
             with ThreadPoolExecutor(max_workers=10) as executor:
                 futures = {
                     executor.submit(
                         get_messages,
-                        client,
+                        self._client,
                         date,
                         self.config.user_email,
                         room,
                         local_tz,
                     ): room
-                    for room in active_rooms
+                    for room in rooms
                 }
                 for future in as_completed(futures):
                     result: MessageAnalysisResult = future.result()
@@ -102,6 +102,15 @@ class WebexClient:
                         messages.extend(result.messages)
                     progress.update(task, advance=1)
 
+        messages.sort(key=lambda x: x.timestamp)
+        return messages
+
+    def get_activity(
+        self, date: datetime, local_tz: tzinfo, room_chunk_size: int = 50
+    ) -> list[Message]:
+        """Get all activity for the specified date as a list of Message objects."""
+        active_rooms = self.get_rooms_active_since_date(date)
+        messages = self.get_messages_for_rooms(active_rooms, date, local_tz)
         messages.sort(key=lambda x: x.timestamp)
         return messages
 
