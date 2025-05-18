@@ -63,6 +63,16 @@ def get_user_config() -> AppConfig:
     )
     time_display_format = cast(Literal["12h", "24h"], time_display_format)
 
+    room_chunk_size = Prompt.ask(
+        "Room fetch chunk size (for performance tuning)",
+        default="50",
+        show_default=True,
+    )
+    try:
+        room_chunk_size = int(room_chunk_size)
+    except ValueError:
+        room_chunk_size = 50
+
     return AppConfig(
         webex_token=webex_token,
         user_email=user_email,
@@ -70,6 +80,7 @@ def get_user_config() -> AppConfig:
         context_window_minutes=context_window_minutes,
         passive_participation=passive_participation,
         time_display_format=time_display_format,
+        room_chunk_size=room_chunk_size,
     )
 
 
@@ -90,7 +101,9 @@ def run_app(config: AppConfig) -> None:
 
     console.print(f"Looking for activity on [bold]{config.target_date.date()}[/]...")
 
-    message_data = webex_client.get_activity(config.target_date, local_tz)
+    message_data = webex_client.get_activity(
+        config.target_date, local_tz, config.room_chunk_size
+    )
 
     # Conversation grouping integration
     context_window = timedelta(minutes=config.context_window_minutes)

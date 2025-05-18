@@ -1,24 +1,17 @@
 """Webex API interaction functions."""
 
 from collections.abc import Generator
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from datetime import UTC, datetime, tzinfo
 
-from rich.console import Console
-from rich.progress import (
-    BarColumn,
-    Progress,
-    SpinnerColumn,
-    TextColumn,
-    TimeElapsedColumn,
-)
+from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
 from webexpythonsdk import WebexAPI
 from webexpythonsdk.models.immutable import Message as SDKMessage, Person, Room
 
 from .config import AppConfig
+from .console_ui import console
 from .models import Message, SpaceType, User
-
-# Initialize Rich console
-console = Console()
 
 
 def sdk_person_to_user(person: Person) -> User:
@@ -36,6 +29,16 @@ def get_space_type(room: Room) -> SpaceType:
         raise ValueError(f"Unknown space type: {room.type}")
 
 
+@dataclass
+class MessageAnalysisResult:
+    """Result of analyzing messages for a specific date in a room."""
+
+    room: Room
+    messages: list[Message]
+    last_activity: datetime | None
+    had_activity_on_or_after_date: bool
+
+
 class WebexClient:
     """Wrapper around Webex API client."""
 
@@ -51,16 +54,53 @@ class WebexClient:
             self._me = self._client.people.me()
         return sdk_person_to_user(self._me)
 
-    def get_activity(self, date: datetime, local_tz: tzinfo) -> list[Message]:
+    def get_activity(
+        self, date: datetime, local_tz: tzinfo, room_chunk_size: int = 50
+    ) -> list[Message]:
         """Get all activity for the specified date as a list of Message objects."""
-        rooms = get_rooms_with_activity(self._client, date, local_tz)
-
         messages: list[Message] = []
+        client = self._client
+
+        # Stage 1: Filter rooms by lastActivity
+        active_rooms: list[Room] = []
+        rooms = client.rooms.list(max=room_chunk_size, sortBy="lastactivity")
         for room in rooms:
-            room_messages = get_messages(
-                self._client, date, self.config.user_email, room, local_tz
+            if room.lastActivity is None:
+                continue
+
+            if room.lastActivity.date() >= date.date():
+                active_rooms.append(room)
+            else:
+                break
+
+        # Stage 2: Fetch messages for the date from filtered rooms
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[bold blue]Fetching messages from active rooms..."),
+            TextColumn("[green]Processed: {task.completed}/{task.total}"),
+            BarColumn(),
+            console=console,
+        ) as progress:
+            task = progress.add_task(
+                "Fetching messages from active rooms...", total=len(active_rooms)
             )
-            messages.extend(room_messages)
+            with ThreadPoolExecutor(max_workers=10) as executor:
+                futures = {
+                    executor.submit(
+                        get_messages,
+                        client,
+                        date,
+                        self.config.user_email,
+                        room,
+                        local_tz,
+                    ): room
+                    for room in active_rooms
+                }
+                for future in as_completed(futures):
+                    result: MessageAnalysisResult = future.result()
+                    if result.messages:
+                        messages.extend(result.messages)
+                    progress.update(task, advance=1)
 
         messages.sort(key=lambda x: x.timestamp)
         return messages
@@ -73,88 +113,9 @@ def get_message_time(message: SDKMessage, local_tz: tzinfo) -> datetime:
     return message_time
 
 
-def get_rooms_with_activity(
-    client: WebexAPI, desired_date: datetime, local_tz: tzinfo
-) -> list[Room]:
-    """Get rooms user is a member of with recent activity within date."""
-    rooms_with_activity: list[Room] = []
-
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[bold blue]{task.description}"),
-        BarColumn(),
-        TimeElapsedColumn(),
-        console=console,
-    ) as progress:
-        fetch_task = progress.add_task("Fetching rooms...", total=None)
-        rooms: Generator[Room, None, None] = client.rooms.list(
-            max=250, sortBy="lastactivity"
-        )
-        progress.update(
-            fetch_task, description="Processing rooms", total=1.0, completed=0.5
-        )
-
-        for room in rooms:
-            progress.update(fetch_task, description=f"Checking room: {room.title}")
-            messages: Generator[SDKMessage, None, None] = client.messages.list(
-                roomId=room.id, max=100
-            )
-
-            first_message_slice_obj = slice(0, 1)
-            first_message_slice: Generator[SDKMessage, None, None] = messages[  # type: ignore
-                first_message_slice_obj
-            ]
-            first_message = next(first_message_slice, None)  # type: ignore
-            if first_message is None:
-                console.log(f"No messages found in room: [yellow]{room.title}[/]")
-                continue
-
-            if first_message.created is None:
-                console.log(
-                    f"First message in room [yellow]{room.title}[/] has no creation "
-                    "time."
-                )
-                continue
-
-            first_message_time = get_message_time(first_message, local_tz)
-            if first_message_time.date() < desired_date.date():
-                console.log(
-                    f"First message in room [yellow]{room.title}[/] is older than the "
-                    "date we are looking for."
-                )
-                break
-            elif first_message_time.date() == desired_date.date():
-                console.log(
-                    f"First message in room [green]{room.title}[/] indicates activity"
-                )
-                rooms_with_activity.append(room)
-                continue
-
-            for message in messages:
-                if message.created is None:
-                    continue
-                message_time = get_message_time(message, local_tz)
-                if message_time.date() == desired_date.date():
-                    console.log(
-                        f"Recent activity found in room: [green]{room.title}[/]"
-                    )
-                    console.log(
-                        f"[{message_time.strftime('%m-%d %H:%M:%S')}] "
-                        f"([cyan]{room.title}[/]) {message.text}"
-                    )
-                    rooms_with_activity.append(room)
-                    break
-                if message_time.date() < desired_date.date():
-                    break
-
-        progress.update(fetch_task, completed=1.0)
-
-    return rooms_with_activity
-
-
 def get_messages(
     client: WebexAPI, date: datetime, user_email: str, room: Room, local_tz: tzinfo
-) -> list[Message]:
+) -> MessageAnalysisResult:
     """Get all messages for a specific date in a room.
 
     Only returns messages if the user sent at least one message in that room on that
@@ -162,51 +123,53 @@ def get_messages(
     """
     all_messages: list[Message] = []
     user_sent = False
+    had_activity_on_or_after_date = False
 
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[bold blue]{task.description}"),
-        BarColumn(),
-        console=console,
-    ) as progress:
-        task = progress.add_task(
-            f"Fetching messages from [cyan]{room.title}[/]", total=None
-        )
+    messages: Generator[SDKMessage, None, None] = client.messages.list(roomId=room.id)
 
-        messages: Generator[SDKMessage, None, None] = client.messages.list(
-            roomId=room.id, max=100
-        )
+    last_activity = None
+    for sdk_message in messages:
+        if sdk_message.created is None:
+            continue
 
-        for sdk_message in messages:
-            if sdk_message.created is None:
-                continue
-
-            message_time = get_message_time(sdk_message, local_tz)
-            if message_time.date() == date.date():
-                sdk_sender = client.people.get(sdk_message.personId)
-                sender = sdk_person_to_user(sdk_sender)
-                recipients: list[User] = []  # Not available from SDK directly
-                msg = Message(
-                    id=sdk_message.id,
-                    space_id=room.id,
-                    space_type=get_space_type(room),
-                    space_name=room.title,
-                    sender=sender,
-                    recipients=recipients,
-                    timestamp=message_time,
-                    content=sdk_message.text or "",
-                )
-                all_messages.append(msg)
-                if sdk_message.personEmail == user_email:
-                    user_sent = True
-            elif message_time.date() < date.date():
-                break
-
-        progress.update(task, completed=1.0)
+        message_time = get_message_time(sdk_message, local_tz)
+        if last_activity is None or message_time > last_activity:
+            last_activity = message_time
+        if message_time.date() == date.date():
+            sdk_sender = client.people.get(sdk_message.personId)
+            sender = sdk_person_to_user(sdk_sender)
+            recipients: list[User] = []  # Not available from SDK directly
+            msg = Message(
+                id=sdk_message.id,
+                space_id=room.id,
+                space_type=get_space_type(room),
+                space_name=room.title,
+                sender=sender,
+                recipients=recipients,
+                timestamp=message_time,
+                content=sdk_message.text or "",
+            )
+            all_messages.append(msg)
+            if sdk_message.personEmail == user_email:
+                user_sent = True
+        if message_time.date() >= date.date():
+            had_activity_on_or_after_date = True
+        elif message_time.date() < date.date():
+            break
 
     # Only return messages if the user sent at least one message in this room
     # on this date
     if user_sent:
-        return all_messages
+        return MessageAnalysisResult(
+            room=room,
+            messages=all_messages,
+            last_activity=last_activity,
+            had_activity_on_or_after_date=had_activity_on_or_after_date,
+        )
     else:
-        return []
+        return MessageAnalysisResult(
+            room=room,
+            messages=[],
+            last_activity=last_activity,
+            had_activity_on_or_after_date=had_activity_on_or_after_date,
+        )
