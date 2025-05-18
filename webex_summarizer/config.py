@@ -18,6 +18,7 @@ class AppConfig:
     context_window_minutes: int = 15
     passive_participation: bool = False
     time_display_format: Literal["12h", "24h"] = "12h"
+    room_chunk_size: int = 50
 
 
 def load_config_from_env() -> None:
