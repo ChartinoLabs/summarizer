@@ -53,7 +53,6 @@ jobs:
         with:
           path: ~/.cache/uv
           key: uv-${{ matrix.python-version }}-${{ hashFiles('uv.lock') }}
-      - run: uv pip install pre-commit
       - uses: pre-commit/action@v3.0.1
 
   ruff:
@@ -72,7 +71,6 @@ jobs:
         with:
           path: ~/.cache/uv
           key: uv-${{ matrix.python-version }}-${{ hashFiles('uv.lock') }}
-      - run: uv pip install ruff
       - run: ruff check Summarizer tests
 
   test:
@@ -91,7 +89,6 @@ jobs:
         with:
           path: ~/.cache/uv
           key: uv-${{ matrix.python-version }}-${{ hashFiles('uv.lock') }}
-      - run: uv pip install pytest pytest-cov
       - run: pytest --cov=Summarizer tests/
 
   bandit:
@@ -110,7 +107,7 @@ jobs:
         with:
           path: ~/.cache/uv
           key: uv-${{ matrix.python-version }}-${{ hashFiles('uv.lock') }}
-      - run: uv pip install bandit
+      - uses: pre-commit/action@v3.0.1
       - run: bandit -r Summarizer
 
   radon:
@@ -129,5 +126,5 @@ jobs:
         with:
           path: ~/.cache/uv
           key: uv-${{ matrix.python-version }}-${{ hashFiles('uv.lock') }}
-      - run: uv pip install radon
+      - uses: pre-commit/action@v3.0.1
       - run: radon cc -s -a Summarizer
