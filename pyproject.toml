@@ -21,10 +21,12 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+    "bandit>=1.8.3",
     "pre-commit>=4.2.0",
     "pytest>=8.3.5",
     "pytest-asyncio>=0.26.0",
     "ruff>=0.11.8",
+    "xenon>=0.9.3",
 ]
 
 [project.scripts]
@@ -61,9 +63,3 @@ combine-as-imports = true
 
 [tool.pyright]
 stubPath = "./webexpythonsdk-stubs"
-
-[dependency-groups]
-dev = [
-    "bandit>=1.8.3",
-    "xenon>=0.9.3",
-]
