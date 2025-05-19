@@ -6,8 +6,8 @@ from unittest.mock import MagicMock
 
 from webexpythonsdk import WebexAPI
 
-from webex_summarizer.config import AppConfig
-from webex_summarizer.webex import WebexClient
+from summarizer.config import AppConfig
+from summarizer.webex import WebexClient
 
 
 class TestWebexClient(unittest.TestCase):
@@ -64,7 +64,7 @@ class TestWebexClient(unittest.TestCase):
 
         from webexpythonsdk.models.immutable import Room
 
-        from webex_summarizer.webex import (
+        from summarizer.webex import (
             Message,
             MessageAnalysisResult,
             SpaceType,
@@ -96,7 +96,7 @@ class TestWebexClient(unittest.TestCase):
                 had_activity_on_or_after_date=True,
             )
 
-        import webex_summarizer.webex as webex_mod
+        import summarizer.webex as webex_mod
 
         orig_get_messages = webex_mod.get_messages
         webex_mod.get_messages = fake_get_messages
