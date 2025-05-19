@@ -54,7 +54,10 @@ jobs:
           path: ~/.cache/uv
           key: uv-${{ matrix.python-version }}-${{ hashFiles('uv.lock') }}
       - run: uv sync --all-extras
-      - uses: pre-commit/action@v3.0.1
+      - name: Run pre-commit (excluding ruff and xenon)
+        run: pre-commit run --all-files
+        env:
+          PRE_COMMIT_EXCLUDE: '^(ruff|ruff-format|xenon)$'
 
   ruff:
     needs: build
