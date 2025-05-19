@@ -14,6 +14,71 @@ def slugify(value: str) -> str:
     return value.strip("-")
 
 
+def group_messages_by_space(messages: list[Message]) -> dict[str, list[Message]]:
+    """Group messages by their space_id."""
+    from collections import defaultdict
+
+    messages_by_space: dict[str, list[Message]] = defaultdict(list)
+    for msg in messages:
+        messages_by_space[msg.space_id].append(msg)
+    return messages_by_space
+
+
+def find_conversation_windows(
+    space_messages: list[Message],
+    context_window: timedelta,
+    user_id: str,
+    include_passive: bool,
+) -> list[list[Message]]:
+    """Find conversation windows in a list of messages for a space."""
+    space_messages = sorted(space_messages, key=lambda m: m.timestamp)
+    used_indices: set[int] = set()
+    windows: list[list[Message]] = []
+    for i, msg in enumerate(space_messages):
+        if i in used_indices:
+            continue
+        is_sent_by_user = msg.sender.id == user_id
+        if not is_sent_by_user and not include_passive:
+            continue
+        window_start = msg.timestamp - context_window
+        window_end = msg.timestamp + context_window
+        convo_msgs = [msg]
+        used_indices.add(i)
+        for j in range(i + 1, len(space_messages)):
+            m2 = space_messages[j]
+            if window_start <= m2.timestamp <= window_end:
+                convo_msgs.append(m2)
+                used_indices.add(j)
+            elif m2.timestamp > window_end:
+                break
+        windows.append(convo_msgs)
+    return windows
+
+
+def build_dm_conversation(
+    convo_msgs: list[Message], user_id: str, conversation_id: int
+) -> Conversation:
+    """Build a Conversation object for a DM conversation window."""
+    participants = {m.sender.id: m.sender for m in convo_msgs}
+    other_participant = next(
+        (p for p in participants.values() if p.id != user_id), None
+    )
+    slug = slugify(other_participant.display_name if other_participant else "unknown")
+    return Conversation(
+        id=f"dm-{slug}-{conversation_id}",
+        space_id=convo_msgs[0].space_id,
+        space_type=convo_msgs[0].space_type,
+        participants=list(participants.values()),
+        messages=convo_msgs,
+        start_time=convo_msgs[0].timestamp,
+        end_time=convo_msgs[-1].timestamp,
+        duration_seconds=int(
+            (convo_msgs[-1].timestamp - convo_msgs[0].timestamp).total_seconds()
+        ),
+        is_threaded=False,
+    )
+
+
 def group_dm_conversations(
     messages: list[Message],
     context_window: timedelta,
@@ -30,60 +95,17 @@ def group_dm_conversations(
     if not messages:
         return []
 
-    from collections import defaultdict
-
-    messages_by_space: dict[str, list[Message]] = defaultdict(list)
-    for msg in messages:
-        messages_by_space[msg.space_id].append(msg)
-
+    messages_by_space = group_messages_by_space(messages)
     conversations: list[Conversation] = []
     conversation_id_counter = 1
 
     for space_messages in messages_by_space.values():
-        # Sort messages by timestamp within each space
-        space_messages = sorted(space_messages, key=lambda m: m.timestamp)
-        used_indices: set[int] = set()
-        for i, msg in enumerate(space_messages):
-            if i in used_indices:
-                continue
-            # Only start a conversation window if the user sent the message, or
-            # if passive is enabled
-            is_sent_by_user = msg.sender.id == user_id
-            if not is_sent_by_user and not include_passive:
-                continue
-            window_start = msg.timestamp - context_window
-            window_end = msg.timestamp + context_window
-            # Collect all messages within the window
-            convo_msgs = [msg]
-            used_indices.add(i)
-            for j in range(i + 1, len(space_messages)):
-                m2 = space_messages[j]
-                if window_start <= m2.timestamp <= window_end:
-                    convo_msgs.append(m2)
-                    used_indices.add(j)
-                elif m2.timestamp > window_end:
-                    break
-            # Build conversation participants
-            participants = {m.sender.id: m.sender for m in convo_msgs}
-            # Always select the other participant (not the authenticated user)
-            other_participant = next(
-                (p for p in participants.values() if p.id != user_id), None
-            )
-            slug = slugify(
-                other_participant.display_name if other_participant else "unknown"
-            )
-            conversation = Conversation(
-                id=f"dm-{slug}-{conversation_id_counter}",
-                space_id=msg.space_id,
-                space_type=msg.space_type,
-                participants=list(participants.values()),
-                messages=convo_msgs,
-                start_time=convo_msgs[0].timestamp,
-                end_time=convo_msgs[-1].timestamp,
-                duration_seconds=int(
-                    (convo_msgs[-1].timestamp - convo_msgs[0].timestamp).total_seconds()
-                ),
-                is_threaded=False,
+        windows = find_conversation_windows(
+            space_messages, context_window, user_id, include_passive
+        )
+        for convo_msgs in windows:
+            conversation = build_dm_conversation(
+                convo_msgs, user_id, conversation_id_counter
             )
             conversations.append(conversation)
             conversation_id_counter += 1
