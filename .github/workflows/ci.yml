@@ -52,7 +52,7 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ~/.cache/uv
-          key: uv-${{ matrix.python-version }}-${{ hashFiles('uv.lock') }}
+          key: ${{ needs.build.outputs.cache-key }}
       - uses: pre-commit/action@v3.0.1
 
   ruff:
@@ -70,7 +70,7 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ~/.cache/uv
-          key: uv-${{ matrix.python-version }}-${{ hashFiles('uv.lock') }}
+          key: ${{ needs.build.outputs.cache-key }}
       - run: uv run ruff check summarizer tests
 
   test:
@@ -88,7 +88,7 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ~/.cache/uv
-          key: uv-${{ matrix.python-version }}-${{ hashFiles('uv.lock') }}
+          key: ${{ needs.build.outputs.cache-key }}
       - run: uv run pytest --cov=summarizer tests/
 
   bandit:
@@ -106,7 +106,7 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ~/.cache/uv
-          key: uv-${{ matrix.python-version }}-${{ hashFiles('uv.lock') }}
+          key: ${{ needs.build.outputs.cache-key }}
       - run: uv run bandit -r summarizer
 
   xenon:
@@ -124,5 +124,5 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ~/.cache/uv
-          key: uv-${{ matrix.python-version }}-${{ hashFiles('uv.lock') }}
+          key: ${{ needs.build.outputs.cache-key }}
       - run: uv run xenon --max-absolute B --max-modules B --max-average A summarizer
