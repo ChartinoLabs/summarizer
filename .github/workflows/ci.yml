@@ -35,7 +35,7 @@ jobs:
           key: uv-${{ matrix.python-version }}-${{ hashFiles('uv.lock') }}
 
       - name: Sync dependencies (locked)
-        run: uv sync --all-extras --all-groups
+        run: uv sync --all-extras
 
   lint:
     needs: build
