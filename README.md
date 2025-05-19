@@ -14,7 +14,7 @@ Leverages the Webex API to identify what conversations the authenticated user ha
 
 ## Installation
 
-This script generally requires Python 3.10 or later and uses [uv](https://github.com/astral-sh/uv) for dependency management. Once uv is installed correctly, execute the following command:
+This script requires Python 3.10 or later and uses [uv](https://github.com/astral-sh/uv) for dependency management. Once uv is installed correctly, execute the following command:
 
 ```bash
 uv pip install -r requirements.txt
