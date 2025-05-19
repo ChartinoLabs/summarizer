@@ -76,6 +76,7 @@ jobs:
           path: ~/.cache/uv
           key: uv-${{ matrix.python-version }}-${{ hashFiles('uv.lock') }}
       - run: uv sync --all-extras
+      - run: uv run ruff format --check summarizer tests
       - run: uv run ruff check summarizer tests
 
   test:
