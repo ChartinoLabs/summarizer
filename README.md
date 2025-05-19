@@ -31,19 +31,13 @@ uv pip install -e "." --with dev
 Run the application through the following command:
 
 ```bash
-uv run python -m webex_summarizer.cli --help
-```
-
-Or, if you have already installed dependencies into your environment, you can simply run:
-
-```bash
-python -m webex_summarizer.cli --help
+uv run summarizer --help
 ```
 
 You can provide your email address and Webex token via CLI options, environment variables, or interactive prompt (prompting for email first, then token):
 
 ```bash
-uv run python -m webex_summarizer.cli --user-email=you@example.com --webex-token=YOUR_TOKEN --target-date=2024-06-01
+uv run summarizer --user-email=you@example.com --webex-token=YOUR_TOKEN --target-date=2024-06-01
 ```
 
 Or with environment variables:
@@ -51,7 +45,7 @@ Or with environment variables:
 ```bash
 export USER_EMAIL=you@example.com
 export WEBEX_TOKEN=YOUR_TOKEN
-uv run python -m webex_summarizer.cli --target-date=2024-06-01
+uv run summarizer --target-date=2024-06-01
 ```
 
 If not provided, you will be prompted for your email and token interactively.

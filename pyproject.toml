@@ -1,7 +1,7 @@
 [project]
-name = "webex-summarizer"
+name = "summarizer"
 version = "0.1.0"
-description = "Extracts Webex conversations you had that occurred during a particular day."
+description = "Summarizes the work a person has done within a given day across multiple applications."
 authors = [
   { name = "Christopher Hart", email = "chart2@cisco.com" }
 ]
@@ -28,7 +28,7 @@ dev = [
 ]
 
 [project.scripts]
-summarizer = "webex_summarizer.cli:app"
+summarizer = "summarizer.cli:app"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
