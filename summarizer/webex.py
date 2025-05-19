@@ -127,11 +127,55 @@ class WebexClient:
         return messages
 
 
-def get_message_time(message: SDKMessage, local_tz: tzinfo) -> datetime:
-    """Get message time in local timezone."""
-    message_time = datetime.strptime(str(message.created), "%Y-%m-%dT%H:%M:%S.%fZ")
+def parse_message_time(sdk_message: SDKMessage, local_tz: tzinfo) -> datetime:
+    """Parse the message creation time to local timezone."""
+    message_time = datetime.strptime(str(sdk_message.created), "%Y-%m-%dT%H:%M:%S.%fZ")
     message_time = message_time.replace(tzinfo=UTC).astimezone(local_tz)
     return message_time
+
+
+def create_message(
+    sdk_message: SDKMessage, client: WebexAPI, room: Room, local_tz: tzinfo
+) -> Message:
+    """Create a Message object from an SDKMessage."""
+    sdk_sender = client.people.get(sdk_message.personId)
+    sender = sdk_person_to_user(sdk_sender)
+    recipients: list[User] = []  # Not available from SDK directly
+    message_time = parse_message_time(sdk_message, local_tz)
+    return Message(
+        id=sdk_message.id,
+        space_id=room.id,
+        space_type=get_space_type(room),
+        space_name=room.title,
+        sender=sender,
+        recipients=recipients,
+        timestamp=message_time,
+        content=sdk_message.text or "",
+    )
+
+
+def build_analysis_result(
+    room: Room,
+    all_messages: list[Message],
+    last_activity: datetime | None,
+    had_activity_on_or_after_date: bool,
+    user_sent: bool,
+) -> MessageAnalysisResult:
+    """Build the MessageAnalysisResult based on whether the user sent a message."""
+    if user_sent:
+        return MessageAnalysisResult(
+            room=room,
+            messages=all_messages,
+            last_activity=last_activity,
+            had_activity_on_or_after_date=had_activity_on_or_after_date,
+        )
+    else:
+        return MessageAnalysisResult(
+            room=room,
+            messages=[],
+            last_activity=last_activity,
+            had_activity_on_or_after_date=had_activity_on_or_after_date,
+        )
 
 
 def get_messages(
@@ -147,50 +191,31 @@ def get_messages(
     had_activity_on_or_after_date = False
 
     messages: Generator[SDKMessage, None, None] = client.messages.list(roomId=room.id)
+    last_activity: datetime | None = None
 
-    last_activity = None
     for sdk_message in messages:
         if sdk_message.created is None:
             continue
 
-        message_time = get_message_time(sdk_message, local_tz)
+        message_time = parse_message_time(sdk_message, local_tz)
         if last_activity is None or message_time > last_activity:
             last_activity = message_time
+
         if message_time.date() == date.date():
-            sdk_sender = client.people.get(sdk_message.personId)
-            sender = sdk_person_to_user(sdk_sender)
-            recipients: list[User] = []  # Not available from SDK directly
-            msg = Message(
-                id=sdk_message.id,
-                space_id=room.id,
-                space_type=get_space_type(room),
-                space_name=room.title,
-                sender=sender,
-                recipients=recipients,
-                timestamp=message_time,
-                content=sdk_message.text or "",
-            )
+            msg = create_message(sdk_message, client, room, local_tz)
             all_messages.append(msg)
             if sdk_message.personEmail == user_email:
                 user_sent = True
+
         if message_time.date() >= date.date():
             had_activity_on_or_after_date = True
         elif message_time.date() < date.date():
             break
 
-    # Only return messages if the user sent at least one message in this room
-    # on this date
-    if user_sent:
-        return MessageAnalysisResult(
-            room=room,
-            messages=all_messages,
-            last_activity=last_activity,
-            had_activity_on_or_after_date=had_activity_on_or_after_date,
-        )
-    else:
-        return MessageAnalysisResult(
-            room=room,
-            messages=[],
-            last_activity=last_activity,
-            had_activity_on_or_after_date=had_activity_on_or_after_date,
-        )
+    return build_analysis_result(
+        room,
+        all_messages,
+        last_activity,
+        had_activity_on_or_after_date,
+        user_sent,
+    )
