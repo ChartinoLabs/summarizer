@@ -34,8 +34,8 @@ jobs:
           path: ~/.cache/uv
           key: uv-${{ matrix.python-version }}-${{ hashFiles('uv.lock') }}
 
-      - name: Install dependencies (locked)
-        run: uv pip install -r uv.lock
+      - name: Sync dependencies (locked)
+        run: uv sync --all --extras
 
   lint:
     needs: build
