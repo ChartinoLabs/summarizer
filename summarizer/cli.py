@@ -7,8 +7,8 @@ from typing import Annotated
 import typer
 from dotenv import load_dotenv
 
-from webex_summarizer.config import AppConfig
-from webex_summarizer.runner import run_app
+from summarizer.config import AppConfig
+from summarizer.runner import run_app
 
 # Load environment variables from .env before initializing the Typer app
 load_dotenv()

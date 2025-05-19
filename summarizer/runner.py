@@ -4,10 +4,10 @@ from datetime import UTC, datetime, timedelta
 
 from webexpythonsdk.exceptions import ApiError
 
-from webex_summarizer.config import AppConfig
-from webex_summarizer.console_ui import console, display_conversations
-from webex_summarizer.grouping import group_all_conversations
-from webex_summarizer.webex import WebexClient
+from summarizer.config import AppConfig
+from summarizer.console_ui import console, display_conversations
+from summarizer.grouping import group_all_conversations
+from summarizer.webex import WebexClient
 
 
 def run_app(config: AppConfig) -> None:
