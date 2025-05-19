@@ -33,6 +33,9 @@ dev = [
 [project.scripts]
 summarizer = "summarizer.cli:app"
 
+[tool.uv]
+package = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = "test_*.py"

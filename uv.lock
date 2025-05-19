@@ -565,7 +565,7 @@ wheels = [
 [[package]]
 name = "summarizer"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "pydantic-settings" },
     { name = "python-dotenv" },
