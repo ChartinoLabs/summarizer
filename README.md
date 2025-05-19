@@ -1,10 +1,20 @@
-# Webex Summarizer
+# Summarizer
 
-A simple Python script that uses the Webex API to return a list of messages the user has sent in Webex spaces, as well as the Webex space the message was sent in and the time.
+Summarizes the work a person has done within a given day across multiple applications. This is useful for asynchronous scrum check-ins or for use in other general work reporting systems.
+
+## Supported Applications
+
+### Webex
+
+Leverages the Webex API to identify what conversations the authenticated user has taken part in throughout the day. Information includes:
+
+- Who the conversation was with (whether it was a direct message or a group conversation)
+- When the conversation started and ended
+- The duration of the conversation
 
 ## Installation
 
-This script generally requires Python 3.9 or later and uses [uv](https://github.com/astral-sh/uv) for dependency management. Once uv is installed correctly, execute the following command:
+This script generally requires Python 3.10 or later and uses [uv](https://github.com/astral-sh/uv) for dependency management. Once uv is installed correctly, execute the following command:
 
 ```bash
 uv pip install -r requirements.txt
