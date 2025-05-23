@@ -1,5 +1,6 @@
 """Contains core orchestration logic for the application."""
 
+import logging
 from datetime import UTC, datetime, timedelta
 
 from webexpythonsdk.exceptions import ApiError
@@ -13,6 +14,8 @@ from summarizer.console_ui import (
 from summarizer.grouping import group_all_conversations
 from summarizer.webex import WebexClient
 
+logger = logging.getLogger(__name__)
+
 
 def run_app(config: AppConfig) -> None:
     """Run the application with the given configuration."""
@@ -22,6 +25,8 @@ def run_app(config: AppConfig) -> None:
             "[yellow]Unable to identify local timezone. Defaulting to UTC.[/]"
         )
         local_tz = UTC
+
+    logger.info("Local timezone is %s", local_tz)
 
     with console.status("[bold green]Connecting to APIs...[/]"):
         webex_client = WebexClient(config)
@@ -42,10 +47,15 @@ def run_app(config: AppConfig) -> None:
                     "https://developer.webex.com/docs/getting-started[/link] "
                     "to obtain a new token and try again.[/]"
                 )
+                logger.error("Invalid Webex API token caused API error: %s", e)
                 return
             else:
+                logger.error(
+                    "Webex API error when getting authenticated user information: %s", e
+                )
                 raise
         console.log(f"Connected as [bold green]{me.display_name}[/]")
+        logger.info("Successfully connected to Webex API as %s", me.display_name)
 
     console.print(f"Looking for activity on [bold]{config.target_date.date()}[/]...")
 

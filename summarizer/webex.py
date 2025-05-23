@@ -1,5 +1,6 @@
 """Webex API interaction functions."""
 
+import logging
 from collections.abc import Generator
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
@@ -12,6 +13,8 @@ from webexpythonsdk.models.immutable import Message as SDKMessage, Person, Room
 from .config import AppConfig
 from .console_ui import console
 from .models import Message, SpaceType, User
+
+logger = logging.getLogger(__name__)
 
 
 def sdk_person_to_user(person: Person) -> User:
@@ -69,16 +72,39 @@ class WebexClient:
         ) as progress:
             task = progress.add_task("Scanning rooms for activity...", total=None)
             for room in rooms:
+                logger.debug("Processing room: id=%s, title=%s", room.id, room.title)
                 if room.lastActivity is None:
                     progress.update(task, advance=1)
+                    logger.debug(
+                        "Room %s (ID %s) has no last activity date, skipping...",
+                        room.title,
+                        room.id,
+                    )
                     continue
                 if room.lastActivity.date() >= date.date():
+                    logger.debug(
+                        "Room %s (ID %s) has last activity at %s, which is on or "
+                        "after date %s, adding to list...",
+                        room.title,
+                        room.id,
+                        room.lastActivity,
+                        date,
+                    )
                     active_rooms.append(room)
                 else:
                     # Still count the room as processed
                     progress.update(task, advance=1)
+                    logger.debug(
+                        "Room %s (ID %s) has last activity at %s, which is before "
+                        "date %s, skipping...",
+                        room.title,
+                        room.id,
+                        room.lastActivity,
+                        date,
+                    )
                     break
                 progress.update(task, advance=1)
+        logger.info("Total active rooms found: %d", len(active_rooms))
         return active_rooms
 
     def get_messages_for_rooms(
@@ -96,6 +122,7 @@ class WebexClient:
             task = progress.add_task(
                 "Fetching messages from rooms...", total=len(rooms)
             )
+            logger.info("Fetching messages from %d active rooms", len(rooms))
             with ThreadPoolExecutor(max_workers=10) as executor:
                 futures = {
                     executor.submit(
@@ -111,9 +138,19 @@ class WebexClient:
                 for future in as_completed(futures):
                     result: MessageAnalysisResult = future.result()
                     if result.messages:
+                        for msg in result.messages:
+                            logger.debug(
+                                "Message ID %s in room %s (ID %s) from sender %s at %s",
+                                msg.id,
+                                result.room.title,
+                                result.room.id,
+                                msg.sender.display_name,
+                                msg.timestamp,
+                            )
                         messages.extend(result.messages)
                     progress.update(task, advance=1)
 
+        logger.info(f"Total messages aggregated: {len(messages)}")
         messages.sort(key=lambda x: x.timestamp)
         return messages
 
@@ -122,7 +159,11 @@ class WebexClient:
     ) -> list[Message]:
         """Get all activity for the specified date as a list of Message objects."""
         active_rooms = self.get_rooms_active_since_date(date)
+        logger.info(
+            "A total of %d active rooms were found on date %s", len(active_rooms), date
+        )
         messages = self.get_messages_for_rooms(active_rooms, date, local_tz)
+        logger.info("A total of %d messages were found on date %s", len(messages), date)
         messages.sort(key=lambda x: x.timestamp)
         return messages
 
@@ -195,6 +236,9 @@ def get_messages(
 
     for sdk_message in messages:
         if sdk_message.created is None:
+            logger.warning(
+                "Message %s has no creation date, skipping...", sdk_message.id
+            )
             continue
 
         message_time = parse_message_time(sdk_message, local_tz)
@@ -203,13 +247,31 @@ def get_messages(
 
         if message_time.date() == date.date():
             msg = create_message(sdk_message, client, room, local_tz)
+            logger.debug(
+                "Processing SDK message %s from email %s created at %s",
+                sdk_message.id,
+                sdk_message.personEmail,
+                sdk_message.created,
+            )
             all_messages.append(msg)
             if sdk_message.personEmail == user_email:
+                logger.debug(
+                    "Authenticated user (%s == %s) sent message %s",
+                    sdk_message.personEmail,
+                    user_email,
+                    sdk_message.id,
+                )
                 user_sent = True
 
         if message_time.date() >= date.date():
             had_activity_on_or_after_date = True
         elif message_time.date() < date.date():
+            logger.debug(
+                "Message %s from email %s is before the target date %s, stopping processing...",
+                sdk_message.id,
+                sdk_message.personEmail,
+                date,
+            )
             break
 
     return build_analysis_result(
