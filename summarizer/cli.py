@@ -1,5 +1,6 @@
 """CLI definition for the application."""
 
+import logging
 from datetime import datetime
 from enum import Enum
 from typing import Annotated
@@ -8,10 +9,15 @@ import typer
 from dotenv import load_dotenv
 
 from summarizer.config import AppConfig
+from summarizer.logging import setup_logging
 from summarizer.runner import run_app
 
 # Load environment variables from .env before initializing the Typer app
 load_dotenv()
+
+# Set up logging
+setup_logging()
+logger = logging.getLogger(__name__)
 
 app = typer.Typer(pretty_exceptions_enable=False)
 
@@ -37,6 +43,7 @@ def main(
             hide_input=True,
         ),
     ],
+    debug: Annotated[bool, typer.Option(help="Enable debug logging")] = False,
     target_date: Annotated[
         str | None,
         typer.Option(
@@ -57,6 +64,10 @@ def main(
     room_chunk_size: Annotated[int, typer.Option(help="Room fetch chunk size")] = 50,
 ) -> None:
     """Webex Summarizer CLI (Typer config parsing demo)."""
+    if debug is True:
+        logger.setLevel(logging.DEBUG)
+        logger.debug("Debug logging enabled")
+
     # Handle target_date prompt with current date
     if target_date is None:
         current_date = datetime.now().strftime("%Y-%m-%d")
@@ -87,9 +98,16 @@ def main(
         time_display_format=time_display_format.value,
         room_chunk_size=room_chunk_size,
     )
+    logger.info("Attempting to log into Webex API as user %s", user_email)
+    logger.info("Targeted date for summarization: %s", target_date)
+    logger.info("Context window size: %d minutes", context_window_minutes)
+    logger.info("Passive participation: %s", passive_participation)
+    logger.info("Time display format: %s", time_display_format.value)
+    logger.info("Room fetch chunk size: %d", room_chunk_size)
 
     run_app(config)
 
 
 if __name__ == "__main__":
+    setup_logging()
     app()
