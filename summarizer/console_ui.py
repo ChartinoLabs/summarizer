@@ -1,7 +1,8 @@
 """Console UI components for webex-summarizer."""
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
+import humanize
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -71,7 +72,9 @@ def display_conversations(
         end_fmt = _format_time(convo.end_time, time_display_format)
         participants = ", ".join([u.display_name for u in convo.participants])
         duration = (
-            f"{convo.duration_seconds // 60} min {convo.duration_seconds % 60} sec"
+            humanize.precisedelta(
+                timedelta(seconds=convo.duration_seconds), minimum_unit="seconds"
+            )
             if convo.duration_seconds is not None
             else "-"
         )
@@ -100,10 +103,82 @@ def display_conversations(
         console.print()  # Blank line between conversations
 
 
+def display_conversations_summary(
+    conversations: list[Conversation],
+    time_display_format: str = "12h",
+) -> None:
+    """Display a summary table of all conversations."""
+    if not conversations:
+        return
+
+    console.print("\n" + "=" * 80)
+    console.print("[bold cyan]Daily Conversation Summary[/]")
+    console.print("=" * 80)
+
+    # Sort conversations by start time (earliest to latest)
+    sorted_conversations = sorted(
+        conversations, key=lambda conv: conv.start_time or datetime.min
+    )
+
+    # Create summary table
+    table = Table(show_header=True, title="Conversation Overview")
+    table.add_column("Conversation ID", style="bold blue", no_wrap=True)
+    table.add_column("Participants", style="green", no_wrap=False)
+    table.add_column("Start Time", style="cyan", no_wrap=True)
+    table.add_column("End Time", style="cyan", no_wrap=True)
+    table.add_column("Duration", style="yellow", no_wrap=True)
+
+    for convo in sorted_conversations:
+        # Format participants as comma-separated list
+        participants = ", ".join([u.display_name for u in convo.participants])
+
+        # Format times
+        start_time = _format_time(convo.start_time, time_display_format)
+        end_time = _format_time(convo.end_time, time_display_format)
+
+        # Format duration using humanize with precision
+        if convo.duration_seconds is not None:
+            duration = humanize.precisedelta(
+                timedelta(seconds=convo.duration_seconds), minimum_unit="seconds"
+            )
+        else:
+            duration = "-"
+
+        table.add_row(
+            convo.id,
+            participants,
+            start_time,
+            end_time,
+            duration,
+        )
+
+    console.print(table)
+
+    # Display summary statistics
+    total_conversations = len(conversations)
+    total_duration_seconds = sum(
+        convo.duration_seconds
+        for convo in conversations
+        if convo.duration_seconds is not None
+    )
+
+    # Use humanize for total duration formatting with precision
+    if total_duration_seconds > 0:
+        duration_summary = humanize.precisedelta(
+            timedelta(seconds=total_duration_seconds), minimum_unit="seconds"
+        )
+    else:
+        duration_summary = "0 seconds"
+
+    console.print("\n[bold]Summary Statistics:[/]")
+    console.print(f"Total conversations: [bold green]{total_conversations}[/]")
+    console.print(f"Total conversation time: [bold yellow]{duration_summary}[/]")
+
+
 def _format_time(dt: datetime | None, fmt: str) -> str:
     if not dt:
         return "-"
     if fmt == "24h":
-        return dt.strftime("%Y-%m-%d %H:%M:%S")
+        return dt.strftime("%H:%M:%S")
     else:
-        return dt.strftime("%Y-%m-%d %I:%M:%S %p")
+        return dt.strftime("%I:%M:%S %p")

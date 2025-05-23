@@ -5,7 +5,11 @@ from datetime import UTC, datetime, timedelta
 from webexpythonsdk.exceptions import ApiError
 
 from summarizer.config import AppConfig
-from summarizer.console_ui import console, display_conversations
+from summarizer.console_ui import (
+    console,
+    display_conversations,
+    display_conversations_summary,
+)
 from summarizer.grouping import group_all_conversations
 from summarizer.webex import WebexClient
 
@@ -61,3 +65,8 @@ def run_app(config: AppConfig) -> None:
 
     # Improved conversation reporting
     display_conversations(conversations, time_display_format=config.time_display_format)
+
+    # Display conversation summary table
+    display_conversations_summary(
+        conversations, time_display_format=config.time_display_format
+    )
