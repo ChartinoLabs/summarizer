@@ -38,14 +38,12 @@ def main(
         ),
     ],
     target_date: Annotated[
-        str,
+        str | None,
         typer.Option(
-            ...,
             help="Date in YYYY-MM-DD format",
             metavar="YYYY-MM-DD",
-            prompt="Enter the date to summarize (YYYY-MM-DD)",
         ),
-    ],
+    ] = None,
     context_window_minutes: Annotated[
         int, typer.Option(help="Context window in minutes")
     ] = 15,
@@ -59,6 +57,19 @@ def main(
     room_chunk_size: Annotated[int, typer.Option(help="Room fetch chunk size")] = 50,
 ) -> None:
     """Webex Summarizer CLI (Typer config parsing demo)."""
+    # Handle target_date prompt with current date
+    if target_date is None:
+        current_date = datetime.now().strftime("%Y-%m-%d")
+        target_date = typer.prompt(
+            f"Enter the date to summarize (YYYY-MM-DD) [default: {current_date}]",
+            default=current_date,
+        )
+
+    # At this point, target_date must be a string.
+    if target_date is None:
+        typer.echo("[red]No date provided.[/red]")
+        raise typer.Exit(1)
+
     # Parse target_date
     try:
         parsed_date = datetime.strptime(target_date, "%Y-%m-%d")
