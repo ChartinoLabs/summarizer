@@ -61,7 +61,7 @@ def main(
     if target_date is None:
         current_date = datetime.now().strftime("%Y-%m-%d")
         target_date = typer.prompt(
-            f"Enter the date to summarize (YYYY-MM-DD) [default: {current_date}]",
+            "Enter the date to summarize (YYYY-MM-DD)",
             default=current_date,
         )
 
