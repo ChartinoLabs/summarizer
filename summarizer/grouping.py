@@ -1,9 +1,12 @@
 """Grouping logic for messages."""
 
+import logging
 import re
 from datetime import timedelta
 
 from .models import Conversation, Message, SpaceType
+
+logger = logging.getLogger(__name__)
 
 
 def slugify(value: str) -> str:
@@ -270,6 +273,9 @@ def group_all_conversations(
         return []
     dms = [m for m in messages if m.space_type == SpaceType.DM]
     groups = [m for m in messages if m.space_type == SpaceType.GROUP]
+    logger.info(
+        "Identified %d DM messages and %d group messages", len(dms), len(groups)
+    )
     conversations: list[Conversation] = []
     if dms:
         conversations.extend(
@@ -279,4 +285,7 @@ def group_all_conversations(
         )
     if groups:
         conversations.extend(group_group_conversations(groups, context_window))
+    logger.info(
+        "Grouped %d messages into %d conversations", len(messages), len(conversations)
+    )
     return conversations
