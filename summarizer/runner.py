@@ -17,8 +17,11 @@ from summarizer.webex import WebexClient
 logger = logging.getLogger(__name__)
 
 
-def run_app(config: AppConfig) -> None:
-    """Run the application with the given configuration."""
+def run_app(config: AppConfig, date_header: bool = False) -> None:
+    """Run the application with the given configuration.
+
+    Optionally print a date header.
+    """
     local_tz = datetime.now().astimezone().tzinfo
     if local_tz is None:
         console.print(
@@ -27,6 +30,11 @@ def run_app(config: AppConfig) -> None:
         local_tz = UTC
 
     logger.info("Local timezone is %s", local_tz)
+
+    if date_header:
+        from summarizer.console_ui import print_date_header
+
+        print_date_header(config.target_date)
 
     with console.status("[bold green]Connecting to APIs...[/]"):
         webex_client = WebexClient(config)
