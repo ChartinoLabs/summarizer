@@ -34,6 +34,9 @@ dev = [
 [project.scripts]
 summarizer = "summarizer.cli:app"
 
+[tool.setuptools.packages.find]
+include = ["summarizer*"]
+
 [tool.uv]
 package = true
 

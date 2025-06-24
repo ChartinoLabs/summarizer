@@ -154,7 +154,10 @@ class WebexClient:
                             if msg.id not in seen_message_ids:
                                 seen_message_ids.add(msg.id)
                                 logger.debug(
-                                    "Message ID %s in room %s (ID %s) from sender %s at %s",
+                                    (
+                                        "Message ID %s in room %s (ID %s) from sender "
+                                        "%s at %s"
+                                    ),
                                     msg.id,
                                     result.room.title,
                                     result.room.id,
@@ -286,7 +289,8 @@ def get_messages(
             had_activity_on_or_after_date = True
         elif message_time.date() < date.date():
             logger.debug(
-                "Message %s from email %s is before the target date %s, stopping processing...",
+                "Message %s from email %s is before the target date %s, "
+                "stopping processing...",
                 sdk_message.id,
                 sdk_message.personEmail,
                 date,

@@ -18,7 +18,10 @@ logger = logging.getLogger(__name__)
 
 
 def run_app(config: AppConfig, date_header: bool = False) -> None:
-    """Run the application with the given configuration. Optionally print a date header."""
+    """Run the application with the given configuration.
+
+    Optionally print a date header.
+    """
     local_tz = datetime.now().astimezone().tzinfo
     if local_tz is None:
         console.print(
