@@ -1,7 +1,7 @@
 """CLI definition for the application."""
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import Enum
 from typing import Annotated
 
@@ -47,7 +47,21 @@ def main(
     target_date: Annotated[
         str | None,
         typer.Option(
-            help="Date in YYYY-MM-DD format",
+            help="Date in YYYY-MM-DD format (mutually exclusive with --start-date/--end-date)",
+            metavar="YYYY-MM-DD",
+        ),
+    ] = None,
+    start_date: Annotated[
+        str | None,
+        typer.Option(
+            help="Start date for range in YYYY-MM-DD format (mutually exclusive with --target-date)",
+            metavar="YYYY-MM-DD",
+        ),
+    ] = None,
+    end_date: Annotated[
+        str | None,
+        typer.Option(
+            help="End date for range in YYYY-MM-DD format (mutually exclusive with --target-date)",
             metavar="YYYY-MM-DD",
         ),
     ] = None,
@@ -68,7 +82,49 @@ def main(
         logger.setLevel(logging.DEBUG)
         logger.debug("Debug logging enabled")
 
-    # Handle target_date prompt with current date
+    # Mutually exclusive validation
+    # Either pick a single date OR pick a date range
+    if target_date and (start_date or end_date):
+        typer.echo(
+            "[red]Cannot use --target-date with --start-date or --end-date. Please choose one mode.[/red]"
+        )
+        raise typer.Exit(1)
+    if (start_date and not end_date) or (end_date and not start_date):
+        typer.echo(
+            "[red]Both --start-date and --end-date must be provided for a range.[/red]"
+        )
+        raise typer.Exit(1)
+
+    if start_date and end_date:
+        # Parse date range
+        try:
+            start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+            end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+        except ValueError as exc:
+            typer.echo(
+                "[red]Invalid date format for range. Please use YYYY-MM-DD.[/red]"
+            )
+            raise typer.Exit(1) from exc
+        if end_dt < start_dt:
+            typer.echo("[red]End date must not be before start date.[/red]")
+            raise typer.Exit(1)
+        # Iterate over range (inclusive)
+        current = start_dt
+        while current <= end_dt:
+            config = AppConfig(
+                webex_token=webex_token,
+                user_email=user_email,
+                target_date=current,
+                context_window_minutes=context_window_minutes,
+                passive_participation=passive_participation,
+                time_display_format=time_display_format.value,
+                room_chunk_size=room_chunk_size,
+            )
+            run_app(config, date_header=True)
+            current += timedelta(days=1)
+        return
+
+    # Single date mode (default)
     if target_date is None:
         current_date = datetime.now().strftime("%Y-%m-%d")
         target_date = typer.prompt(
@@ -105,7 +161,7 @@ def main(
     logger.info("Time display format: %s", time_display_format.value)
     logger.info("Room fetch chunk size: %d", room_chunk_size)
 
-    run_app(config)
+    run_app(config, date_header=False)
 
 
 if __name__ == "__main__":
