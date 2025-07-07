@@ -60,6 +60,7 @@ class WebexClient:
     def get_rooms_active_since_date(self, date: datetime) -> list[Room]:
         """Get all rooms that have had activity since the given date."""
         active_rooms: list[Room] = []
+        seen_room_ids: set[str] = set()  # Track seen room IDs
         rooms = self._client.rooms.list(
             max=self.config.room_chunk_size, sortBy="lastactivity"
         )
@@ -73,6 +74,15 @@ class WebexClient:
             task = progress.add_task("Scanning rooms for activity...", total=None)
             for room in rooms:
                 logger.debug("Processing room: id=%s, title=%s", room.id, room.title)
+                if room.id in seen_room_ids:
+                    logger.debug(
+                        "Room %s (ID %s) already processed, skipping...",
+                        room.title,
+                        room.id,
+                    )
+                    progress.update(task, advance=1)
+                    continue
+                seen_room_ids.add(room.id)
                 if room.lastActivity is None:
                     progress.update(task, advance=1)
                     logger.debug(
@@ -112,6 +122,7 @@ class WebexClient:
     ) -> list[Message]:
         """Get all messages for the given rooms and date."""
         messages: list[Message] = []
+        seen_message_ids: set[str] = set()  # Track seen message IDs
         with Progress(
             SpinnerColumn(),
             TextColumn("[bold blue]Fetching messages from active rooms..."),
@@ -139,15 +150,26 @@ class WebexClient:
                     result: MessageAnalysisResult = future.result()
                     if result.messages:
                         for msg in result.messages:
-                            logger.debug(
-                                "Message ID %s in room %s (ID %s) from sender %s at %s",
-                                msg.id,
-                                result.room.title,
-                                result.room.id,
-                                msg.sender.display_name,
-                                msg.timestamp,
-                            )
-                        messages.extend(result.messages)
+                            # Only add if we haven't seen this message ID before
+                            if msg.id not in seen_message_ids:
+                                seen_message_ids.add(msg.id)
+                                logger.debug(
+                                    (
+                                        "Message ID %s in room %s (ID %s) from sender "
+                                        "%s at %s"
+                                    ),
+                                    msg.id,
+                                    result.room.title,
+                                    result.room.id,
+                                    msg.sender.display_name,
+                                    msg.timestamp,
+                                )
+                                messages.append(msg)
+                            else:
+                                logger.debug(
+                                    "Skipping duplicate message ID %s",
+                                    msg.id,
+                                )
                     progress.update(task, advance=1)
 
         logger.info(f"Total messages aggregated: {len(messages)}")
@@ -267,7 +289,8 @@ def get_messages(
             had_activity_on_or_after_date = True
         elif message_time.date() < date.date():
             logger.debug(
-                "Message %s from email %s is before the target date %s, stopping processing...",
+                "Message %s from email %s is before the target date %s, "
+                "stopping processing...",
                 sdk_message.id,
                 sdk_message.personEmail,
                 date,
