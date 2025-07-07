@@ -34,6 +34,8 @@ Run the application through the following command:
 uv run summarizer --help
 ```
 
+### Single Date
+
 You can provide your email address and Webex token via CLI options, environment variables, or interactive prompt (prompting for email first, then token):
 
 ```bash
@@ -50,8 +52,23 @@ uv run summarizer --target-date=2024-06-01
 
 If not provided, you will be prompted for your email and token interactively.
 
+### Date Range
+
+You can also specify a date range to summarize activity over multiple days. The `--start-date` and `--end-date` options are mutually exclusive with `--target-date`.
+
+```bash
+uv run summarizer --user-email=you@example.com --webex-token=YOUR_TOKEN --start-date=2024-06-01 --end-date=2024-06-03
+```
+
+### Other Options
+
 Other options (with defaults):
+
+- `--target-date`: The specific date to summarize (e.g., `2024-06-01`).
+- `--start-date`: The start date for a range summary.
+- `--end-date`: The end date for a range summary.
 - `--context-window-minutes`: Context window in minutes (default: 15)
 - `--passive-participation`: Include conversations where you only received messages (default: False)
 - `--time-display-format`: Time display format ('12h' or '24h', default: '12h')
 - `--room-chunk-size`: Room fetch chunk size (default: 50)
+- `--debug`: Enable debug logging.

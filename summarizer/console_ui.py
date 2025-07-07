@@ -182,3 +182,18 @@ def _format_time(dt: datetime | None, fmt: str) -> str:
         return dt.strftime("%H:%M:%S")
     else:
         return dt.strftime("%I:%M:%S %p")
+
+
+# For the range of dates, print a header with each date
+# in the range for ease of use/viewing.
+def print_date_header(date: datetime) -> None:
+    """Print a visually distinct header for a date using box-drawing characters."""
+    date_str = date.strftime("%Y-%m-%d")
+    header_text = f" {date_str} — Messages "
+    width = max(60, len(header_text) + 8)
+    top = f"╔{'═' * (width - 2)}╗"
+    mid = f"║{header_text.center(width - 2)}║"
+    bot = f"╚{'═' * (width - 2)}╝"
+    console.print("\n" + top, style="bold blue")
+    console.print(mid, style="bold white")
+    console.print(bot, style="bold blue")
