@@ -8,6 +8,7 @@ from datetime import UTC, datetime, tzinfo
 
 from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
 from webexpythonsdk import WebexAPI
+from webexpythonsdk.exceptions import ApiError
 from webexpythonsdk.models.immutable import Message as SDKMessage, Person, Room
 
 from .config import AppConfig
@@ -30,6 +31,52 @@ def get_space_type(room: Room) -> SpaceType:
         return SpaceType.GROUP
     else:
         raise ValueError(f"Unknown space type: {room.type}")
+
+
+# Cache for person lookups to avoid repeated API calls for deleted users
+_person_cache: dict[str, User] = {}
+
+
+def safe_get_person(
+    client: WebexAPI, person_id: str, cache: dict[str, User] | None = None
+) -> User:
+    """Safely fetch a person, returning a placeholder for deleted users.
+
+    Single Responsibility: Handle all person-fetching errors in one place.
+
+    Args:
+        client: Webex API client
+        person_id: ID of the person to fetch
+        cache: Optional cache dictionary to store/retrieve users
+
+    Returns:
+        User object (real or placeholder for deleted users)
+    """
+    # Use provided cache or module-level cache
+    cache = cache if cache is not None else _person_cache
+
+    # Check cache first
+    if person_id in cache:
+        return cache[person_id]
+
+    try:
+        # Try to fetch the person from API
+        sdk_person = client.people.get(person_id)
+        user = sdk_person_to_user(sdk_person)
+        cache[person_id] = user
+        return user
+    except ApiError as e:
+        if "404" in str(e):
+            # Person not found - create placeholder
+            placeholder_user = User(id=person_id, display_name="[Deleted User]")
+            cache[person_id] = placeholder_user
+            logger.info(
+                "Person %s no longer exists in Webex, using placeholder", person_id
+            )
+            return placeholder_user
+        else:
+            # Re-raise other API errors
+            raise
 
 
 @dataclass
@@ -201,8 +248,7 @@ def create_message(
     sdk_message: SDKMessage, client: WebexAPI, room: Room, local_tz: tzinfo
 ) -> Message:
     """Create a Message object from an SDKMessage."""
-    sdk_sender = client.people.get(sdk_message.personId)
-    sender = sdk_person_to_user(sdk_sender)
+    sender = safe_get_person(client, sdk_message.personId)
     recipients: list[User] = []  # Not available from SDK directly
     message_time = parse_message_time(sdk_message, local_tz)
     return Message(
