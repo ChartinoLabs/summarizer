@@ -190,7 +190,10 @@ def main(
     if mode == "range":
         # Iterate over date range (inclusive)
         current = parsed_start_date
-        assert current is not None and parsed_end_date is not None
+        if current is None or parsed_end_date is None:
+            raise ValueError(
+                "Both start_date and end_date must be provided for range mode"
+            )
         while current <= parsed_end_date:
             config = AppConfig(
                 webex_token=webex_token,
@@ -206,7 +209,8 @@ def main(
         return
 
     # Single date mode
-    assert parsed_target_date is not None
+    if parsed_target_date is None:
+        raise ValueError("Target date must be provided for single date mode")
     # Construct AppConfig for a single date
     config = AppConfig(
         webex_token=webex_token,
