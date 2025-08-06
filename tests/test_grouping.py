@@ -49,7 +49,10 @@ class TestGroupingBugFix(unittest.TestCase):
                 sender=self.karthik,
                 recipients=[],
                 timestamp=datetime(2025, 8, 6, 8, 21, 49),
-                content="Yes, works on Safari. But not on Chrome even after clearing the cache.",
+                content=(
+                    "Yes, works on Safari. But not on Chrome even after clearing "
+                    "the cache."
+                ),
             ),
             Message(
                 id="msg4",
@@ -89,7 +92,10 @@ class TestGroupingBugFix(unittest.TestCase):
                 sender=self.karthik,
                 recipients=[],
                 timestamp=datetime(2025, 8, 6, 8, 27, 49),
-                content="Oops, I didn't clear the cookies. It works perfectly now after doing that. Thanks, Christopher.",
+                content=(
+                    "Oops, I didn't clear the cookies. It works perfectly now "
+                    "after doing that. Thanks, Christopher."
+                ),
             ),
         ]
 
@@ -128,7 +134,7 @@ class TestGroupingBugFix(unittest.TestCase):
         ]
 
     def test_cross_space_grouping_bug_is_fixed(self) -> None:
-        """Test that messages from different spaces are not incorrectly grouped together.
+        """Test that messages from different spaces are not incorrectly grouped.
 
         This test reproduces the bug described in the user's report where messages
         from different WebEx spaces were incorrectly grouped into the same conversation.
@@ -162,7 +168,8 @@ class TestGroupingBugFix(unittest.TestCase):
             self.assertEqual(
                 len(space_ids),
                 1,
-                f"Conversation {conversation.id} contains messages from multiple spaces: {space_ids}",
+                f"Conversation {conversation.id} contains messages from multiple "
+                f"spaces: {space_ids}",
             )
 
         # Verify that AskCX conversations only contain AskCX participants
@@ -173,7 +180,8 @@ class TestGroupingBugFix(unittest.TestCase):
             self.assertEqual(
                 len(unexpected_participants),
                 0,
-                f"AskCX conversation contains unexpected participants: {unexpected_participants}",
+                f"AskCX conversation contains unexpected participants: "
+                f"{unexpected_participants}",
             )
 
         # Verify that other space conversations don't contain AskCX participants
@@ -184,7 +192,8 @@ class TestGroupingBugFix(unittest.TestCase):
             self.assertEqual(
                 len(contaminating_participants),
                 0,
-                f"Other space conversation contains AskCX participants: {contaminating_participants}",
+                f"Other space conversation contains AskCX participants: "
+                f"{contaminating_participants}",
             )
 
     def test_single_space_grouping_still_works(self) -> None:
@@ -194,7 +203,8 @@ class TestGroupingBugFix(unittest.TestCase):
 
         conversations = group_group_conversations(self.askcx_messages, context_window)
 
-        # Should have exactly one conversation (all messages are within time window and same space)
+        # Should have exactly one conversation (all messages are within time window
+        # and same space)
         self.assertEqual(
             len(conversations),
             1,
