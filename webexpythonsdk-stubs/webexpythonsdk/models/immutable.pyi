@@ -21,3 +21,10 @@ class Room:
     title: str
     type: RoomType
     lastActivity: datetime | None  # noqa: N803, N815
+
+class Membership:
+    id: str
+    roomId: str  # noqa: N803, N815
+    personId: str  # noqa: N803, N815
+    personEmail: str  # noqa: N803, N815
+    isModerator: bool  # noqa: N803, N815
