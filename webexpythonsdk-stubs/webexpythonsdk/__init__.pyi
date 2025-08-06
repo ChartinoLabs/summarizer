@@ -1,6 +1,6 @@
 from collections.abc import Generator
 
-from .models.immutable import Message, Person, Room
+from .models.immutable import Membership, Message, Person, Room
 
 class WebexAPI:
     def __init__(self, access_token: str) -> None: ...
@@ -10,6 +10,8 @@ class WebexAPI:
     def rooms(self) -> RoomsAPI: ...
     @property
     def messages(self) -> MessagesAPI: ...
+    @property
+    def memberships(self) -> MembershipsAPI: ...
 
 class PeopleAPI:
     def me(self) -> Person: ...
@@ -29,3 +31,10 @@ class MessagesAPI:
         roomId: str,  # noqa: N803
         max: int = ...,
     ) -> Generator[Message, None, None]: ...
+
+class MembershipsAPI:
+    def list(
+        self,
+        roomId: str,  # noqa: N803
+        max: int = ...,
+    ) -> Generator[Membership, None, None]: ...
