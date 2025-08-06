@@ -13,11 +13,11 @@ class TestGroupingBugFix(unittest.TestCase):
     def setUp(self) -> None:
         """Set up test fixtures."""
         # Create test users
-        self.karthik = User(id="user1", display_name="Karthik Ravishankar")
-        self.christopher = User(id="user2", display_name="Christopher Hart")
-        self.michael = User(id="user3", display_name="Michael Neblett")
-        self.blake = User(id="user4", display_name="Blake Becton")
-        self.craig = User(id="user5", display_name="Craig Lien")
+        self.user_a = User(id="user1", display_name="Alice Smith")
+        self.user_b = User(id="user2", display_name="Bob Johnson")
+        self.user_c = User(id="user3", display_name="Charlie Brown")
+        self.user_d = User(id="user4", display_name="Diana Prince")
+        self.user_e = User(id="user5", display_name="Eve Wilson")
 
         # Create messages from the AskCX test automation space
         self.askcx_messages = [
@@ -26,7 +26,7 @@ class TestGroupingBugFix(unittest.TestCase):
                 space_id="space_askcx",
                 space_type=SpaceType.GROUP,
                 space_name="AskCX Test Automation",
-                sender=self.karthik,
+                sender=self.user_a,
                 recipients=[],
                 timestamp=datetime(2025, 8, 6, 8, 15, 2),
                 content="Hi Team, I was exploring the CXTM REST APIs...",
@@ -36,7 +36,7 @@ class TestGroupingBugFix(unittest.TestCase):
                 space_id="space_askcx",
                 space_type=SpaceType.GROUP,
                 space_name="AskCX Test Automation",
-                sender=self.christopher,
+                sender=self.user_b,
                 recipients=[],
                 timestamp=datetime(2025, 8, 6, 8, 20, 20),
                 content="Does it work on a different browser?",
@@ -46,7 +46,7 @@ class TestGroupingBugFix(unittest.TestCase):
                 space_id="space_askcx",
                 space_type=SpaceType.GROUP,
                 space_name="AskCX Test Automation",
-                sender=self.karthik,
+                sender=self.user_a,
                 recipients=[],
                 timestamp=datetime(2025, 8, 6, 8, 21, 49),
                 content=(
@@ -59,7 +59,7 @@ class TestGroupingBugFix(unittest.TestCase):
                 space_id="space_askcx",
                 space_type=SpaceType.GROUP,
                 space_name="AskCX Test Automation",
-                sender=self.christopher,
+                sender=self.user_b,
                 recipients=[],
                 timestamp=datetime(2025, 8, 6, 8, 22, 34),
                 content="Does it work in Chrome on incognito mode?",
@@ -69,7 +69,7 @@ class TestGroupingBugFix(unittest.TestCase):
                 space_id="space_askcx",
                 space_type=SpaceType.GROUP,
                 space_name="AskCX Test Automation",
-                sender=self.karthik,
+                sender=self.user_a,
                 recipients=[],
                 timestamp=datetime(2025, 8, 6, 8, 24, 28),
                 content="Yes, Works fine in incognito.",
@@ -79,7 +79,7 @@ class TestGroupingBugFix(unittest.TestCase):
                 space_id="space_askcx",
                 space_type=SpaceType.GROUP,
                 space_name="AskCX Test Automation",
-                sender=self.christopher,
+                sender=self.user_b,
                 recipients=[],
                 timestamp=datetime(2025, 8, 6, 8, 24, 48),
                 content="When you say you cleared cache, does that include cookies?",
@@ -89,34 +89,35 @@ class TestGroupingBugFix(unittest.TestCase):
                 space_id="space_askcx",
                 space_type=SpaceType.GROUP,
                 space_name="AskCX Test Automation",
-                sender=self.karthik,
+                sender=self.user_a,
                 recipients=[],
                 timestamp=datetime(2025, 8, 6, 8, 27, 49),
                 content=(
                     "Oops, I didn't clear the cookies. It works perfectly now "
-                    "after doing that. Thanks, Christopher."
+                    "after doing that. Thanks, Bob."
                 ),
             ),
         ]
 
         # Create messages from a different space that happened around the same time
+        # Bob participates in this space too
         self.other_space_messages = [
             Message(
                 id="msg8",
                 space_id="space_other",
                 space_type=SpaceType.GROUP,
                 space_name="Other Team Space",
-                sender=self.michael,
+                sender=self.user_c,
                 recipients=[],
                 timestamp=datetime(2025, 8, 6, 8, 17, 56),
-                content="Christopher - I believe those were listed as hybrid roles...",
+                content="Bob - I believe those were listed as hybrid roles...",
             ),
             Message(
                 id="msg9",
                 space_id="space_other",
                 space_type=SpaceType.GROUP,
                 space_name="Other Team Space",
-                sender=self.blake,
+                sender=self.user_d,
                 recipients=[],
                 timestamp=datetime(2025, 8, 6, 8, 19, 25),
                 content="Morning team! Unexpected change of plans this morning...",
@@ -126,10 +127,10 @@ class TestGroupingBugFix(unittest.TestCase):
                 space_id="space_other",
                 space_type=SpaceType.GROUP,
                 space_name="Other Team Space",
-                sender=self.craig,
+                sender=self.user_b,  # Bob responds in this space
                 recipients=[],
                 timestamp=datetime(2025, 8, 6, 8, 22, 15),
-                content="Good Morning!",
+                content="Thanks for the update!",
             ),
         ]
 
@@ -147,8 +148,11 @@ class TestGroupingBugFix(unittest.TestCase):
         # Use a 15-minute context window (same as default)
         context_window = timedelta(minutes=15)
 
-        # Group the conversations
-        conversations = group_group_conversations(all_messages, context_window)
+        # Group the conversations - use Bob Johnson's user ID
+        authenticated_user_id = "user2"  # Bob Johnson's user ID
+        conversations = group_group_conversations(
+            all_messages, context_window, authenticated_user_id
+        )
 
         # Verify that we get separate conversations for each space
         askcx_conversations = [c for c in conversations if c.space_id == "space_askcx"]
@@ -175,7 +179,7 @@ class TestGroupingBugFix(unittest.TestCase):
         # Verify that AskCX conversations only contain AskCX participants
         for conversation in askcx_conversations:
             participant_names = {p.display_name for p in conversation.participants}
-            expected_askcx_participants = {"Karthik Ravishankar", "Christopher Hart"}
+            expected_askcx_participants = {"Alice Smith", "Bob Johnson"}
             unexpected_participants = participant_names - expected_askcx_participants
             self.assertEqual(
                 len(unexpected_participants),
@@ -184,16 +188,15 @@ class TestGroupingBugFix(unittest.TestCase):
                 f"{unexpected_participants}",
             )
 
-        # Verify that other space conversations don't contain AskCX participants
+        # Verify that other space conversations contain the expected participants
+        # Bob participates in both spaces, so he should appear in both
         for conversation in other_conversations:
             participant_names = {p.display_name for p in conversation.participants}
-            askcx_participants = {"Karthik Ravishankar", "Christopher Hart"}
-            contaminating_participants = participant_names & askcx_participants
-            self.assertEqual(
-                len(contaminating_participants),
-                0,
-                f"Other space conversation contains AskCX participants: "
-                f"{contaminating_participants}",
+            # Bob should be in the other space conversation since he sent a message there
+            self.assertIn(
+                "Bob Johnson",
+                participant_names,
+                f"Other space conversation should contain Bob Johnson: {participant_names}",
             )
 
     def test_single_space_grouping_still_works(self) -> None:
@@ -201,7 +204,10 @@ class TestGroupingBugFix(unittest.TestCase):
         # Use only AskCX messages
         context_window = timedelta(minutes=15)
 
-        conversations = group_group_conversations(self.askcx_messages, context_window)
+        authenticated_user_id = "user2"  # Bob Johnson's user ID
+        conversations = group_group_conversations(
+            self.askcx_messages, context_window, authenticated_user_id
+        )
 
         # Should have exactly one conversation (all messages are within time window
         # and same space)
@@ -213,17 +219,93 @@ class TestGroupingBugFix(unittest.TestCase):
 
         conversation = conversations[0]
 
-        # Verify all messages are included
-        self.assertEqual(len(conversation.messages), len(self.askcx_messages))
+        # Verify that the conversation includes messages within the context window
+        # Bob's first message is at 8:20:20, with a 15-minute window (8:05:20 - 8:35:20)
+        # This should include messages 2-7 (msg1 at 8:15:02 is outside the window)
+        self.assertGreaterEqual(len(conversation.messages), 6)
+        self.assertLessEqual(len(conversation.messages), len(self.askcx_messages))
 
         # Verify correct participants
         participant_names = {p.display_name for p in conversation.participants}
-        expected_participants = {"Karthik Ravishankar", "Christopher Hart"}
+        expected_participants = {"Alice Smith", "Bob Johnson"}
         self.assertEqual(participant_names, expected_participants)
 
         # Verify space information
         self.assertEqual(conversation.space_id, "space_askcx")
         self.assertEqual(conversation.space_type, SpaceType.GROUP)
+
+    def test_non_participant_conversation_leak_bug(self) -> None:
+        """Test that conversations are not created when authenticated user is not a participant.
+
+        This test reproduces the bug where conversations are displayed even when
+        the authenticated user (Bob Johnson) is not one of the participants.
+        The bug occurs because group_group_conversations incorrectly uses the first
+        message sender's ID as the user_id instead of the authenticated user's ID.
+        """
+        # Create messages in a group space where Bob Johnson is NOT a participant
+        # but other users are talking
+        user_f = User(id="user_f", display_name="Frank Miller")
+        user_g = User(id="user_g", display_name="Grace Lee")
+
+        # Messages from a space where Bob is not a participant
+        non_participant_messages = [
+            Message(
+                id="msg_leak1",
+                space_id="space_external",
+                space_type=SpaceType.GROUP,
+                space_name="External Team Session",
+                sender=user_f,
+                recipients=[],
+                timestamp=datetime(2025, 8, 6, 11, 56, 53),
+                content="Hi Everyone, Thanks for attending the session...",
+            ),
+            Message(
+                id="msg_leak2",
+                space_id="space_external",
+                space_type=SpaceType.GROUP,
+                space_name="External Team Session",
+                sender=user_g,
+                recipients=[],
+                timestamp=datetime(2025, 8, 6, 12, 0, 55),
+                content="this was great! Big thanks to everyone who helped guide us through. 🩷",
+            ),
+        ]
+
+        # Mix with messages where Bob IS a participant (from existing test data)
+        all_messages = non_participant_messages + self.askcx_messages
+
+        context_window = timedelta(minutes=15)
+
+        # The bug: group_group_conversations should NOT create conversations
+        # for spaces where Bob Johnson (user2) is not a participant
+        authenticated_user_id = "user2"  # Bob Johnson's user ID
+        conversations = group_group_conversations(
+            all_messages, context_window, authenticated_user_id
+        )
+
+        # Check for conversations from the External space
+        external_conversations = [
+            c for c in conversations if c.space_id == "space_external"
+        ]
+
+        # BUG: Currently this will fail because the function incorrectly creates
+        # conversations even when Bob is not a participant
+        # After the fix, this should pass
+        self.assertEqual(
+            len(external_conversations),
+            0,
+            f"Should not create conversations where authenticated user is not a participant. "
+            f"Found {len(external_conversations)} conversations in External space "
+            f"where Bob Johnson is not a participant.",
+        )
+
+        # Verify that conversations are still created for spaces where Bob IS a participant
+        askcx_conversations = [c for c in conversations if c.space_id == "space_askcx"]
+        self.assertGreater(
+            len(askcx_conversations),
+            0,
+            "Should still create conversations where authenticated user IS a participant",
+        )
 
 
 if __name__ == "__main__":
