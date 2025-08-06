@@ -72,7 +72,8 @@ def build_dm_conversation(
         (p for p in participants.values() if p.id != user_id), None
     )
 
-    # If we don't have the other participant from messages, try to get it from room memberships
+    # If we don't have the other participant from messages, try to get it from room
+    # memberships
     if other_participant is None and client is not None:
         try:
             memberships = client.memberships.list(roomId=convo_msgs[0].space_id)
@@ -84,7 +85,8 @@ def build_dm_conversation(
                     break
         except Exception as e:
             logger.warning(
-                f"Could not fetch room memberships for space {convo_msgs[0].space_id}: {e}"
+                "Could not fetch room memberships for space "
+                f"{convo_msgs[0].space_id}: {e}"
             )
 
     slug = slugify(other_participant.display_name if other_participant else "unknown")
