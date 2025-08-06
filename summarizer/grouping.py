@@ -4,6 +4,8 @@ import logging
 import re
 from datetime import timedelta
 
+from webexpythonsdk import WebexAPI
+
 from .models import Conversation, Message, SpaceType
 
 logger = logging.getLogger(__name__)
@@ -59,13 +61,32 @@ def find_conversation_windows(
 
 
 def build_dm_conversation(
-    convo_msgs: list[Message], user_id: str, conversation_id: int
+    convo_msgs: list[Message],
+    user_id: str,
+    conversation_id: int,
+    client: WebexAPI | None = None,
 ) -> Conversation:
     """Build a Conversation object for a DM conversation window."""
     participants = {m.sender.id: m.sender for m in convo_msgs}
     other_participant = next(
         (p for p in participants.values() if p.id != user_id), None
     )
+
+    # If we don't have the other participant from messages, try to get it from room memberships
+    if other_participant is None and client is not None:
+        try:
+            memberships = client.memberships.list(roomId=convo_msgs[0].space_id)
+            for membership in memberships:
+                if membership.personId != user_id:
+                    from .webex import safe_get_person
+
+                    other_participant = safe_get_person(client, membership.personId)
+                    break
+        except Exception as e:
+            logger.warning(
+                f"Could not fetch room memberships for space {convo_msgs[0].space_id}: {e}"
+            )
+
     slug = slugify(other_participant.display_name if other_participant else "unknown")
     return Conversation(
         id=f"dm-{slug}-{conversation_id}",
@@ -87,6 +108,7 @@ def group_dm_conversations(
     context_window: timedelta,
     user_id: str,
     include_passive: bool = False,
+    client: WebexAPI | None = None,
 ) -> list[Conversation]:
     """Group messages in DM space into conversations based on time context window.
 
@@ -108,7 +130,7 @@ def group_dm_conversations(
         )
         for convo_msgs in windows:
             conversation = build_dm_conversation(
-                convo_msgs, user_id, conversation_id_counter
+                convo_msgs, user_id, conversation_id_counter, client
             )
             conversations.append(conversation)
             conversation_id_counter += 1
@@ -264,6 +286,7 @@ def group_all_conversations(
     context_window: timedelta,
     user_id: str,
     include_passive: bool = False,
+    client: WebexAPI | None = None,
 ) -> list[Conversation]:
     """Group all messages (DM and group spaces) into conversations.
 
@@ -280,7 +303,11 @@ def group_all_conversations(
     if dms:
         conversations.extend(
             group_dm_conversations(
-                dms, context_window, user_id, include_passive=include_passive
+                dms,
+                context_window,
+                user_id,
+                include_passive=include_passive,
+                client=client,
             )
         )
     if groups:
