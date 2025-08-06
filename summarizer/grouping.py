@@ -250,7 +250,7 @@ def _group_non_threaded_messages(
 def group_group_conversations(
     messages: list[Message], context_window: timedelta
 ) -> list[Conversation]:
-    """Group messages in a group space into conversations using heuristics.
+    """Group messages in group spaces into conversations using heuristics.
 
     Heuristics:
     - Threaded: If the user starts or replies to a thread, group all messages in that
@@ -260,27 +260,48 @@ def group_group_conversations(
     - Non-threaded: Use context window logic as in DMs, but only for messages sent by
       the user.
     - Each message can only belong to one conversation.
+    - Messages are grouped by space first to prevent cross-space contamination.
     """
     if not messages:
         return []
-    messages = sorted(messages, key=lambda m: m.timestamp)
-    user_id = messages[0].sender.id if messages else None
-    if user_id is None:
-        return []
-    used_indices: set[int] = set()
-    # Threaded
-    thread_conversations, thread_owners = _group_threaded_messages(messages)
-    thread_convos, next_id = _create_thread_conversations(
-        thread_conversations, thread_owners, user_id, conversation_id_start=1
-    )
-    for i, msg in enumerate(messages):
-        if msg.thread is not None:
-            used_indices.add(i)
-    # Non-threaded
-    nonthread_convos = _group_non_threaded_messages(
-        messages, context_window, user_id, used_indices, conversation_id_start=next_id
-    )
-    return thread_convos + nonthread_convos
+
+    # Group messages by space first to prevent cross-space contamination
+    messages_by_space = group_messages_by_space(messages)
+    conversations: list[Conversation] = []
+    conversation_id_counter = 1
+
+    for space_messages in messages_by_space.values():
+        space_messages = sorted(space_messages, key=lambda m: m.timestamp)
+        user_id = space_messages[0].sender.id if space_messages else None
+        if user_id is None:
+            continue
+        used_indices: set[int] = set()
+        # Threaded
+        thread_conversations, thread_owners = _group_threaded_messages(space_messages)
+        thread_convos, next_id = _create_thread_conversations(
+            thread_conversations,
+            thread_owners,
+            user_id,
+            conversation_id_start=conversation_id_counter,
+        )
+        conversations.extend(thread_convos)
+        conversation_id_counter = next_id
+
+        for i, msg in enumerate(space_messages):
+            if msg.thread is not None:
+                used_indices.add(i)
+        # Non-threaded
+        nonthread_convos = _group_non_threaded_messages(
+            space_messages,
+            context_window,
+            user_id,
+            used_indices,
+            conversation_id_start=conversation_id_counter,
+        )
+        conversations.extend(nonthread_convos)
+        conversation_id_counter += len(nonthread_convos)
+
+    return conversations
 
 
 def group_all_conversations(
