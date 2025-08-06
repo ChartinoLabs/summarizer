@@ -248,7 +248,7 @@ def _group_non_threaded_messages(
 
 
 def group_group_conversations(
-    messages: list[Message], context_window: timedelta
+    messages: list[Message], context_window: timedelta, user_id: str
 ) -> list[Conversation]:
     """Group messages in group spaces into conversations using heuristics.
 
@@ -272,8 +272,9 @@ def group_group_conversations(
 
     for space_messages in messages_by_space.values():
         space_messages = sorted(space_messages, key=lambda m: m.timestamp)
-        user_id = space_messages[0].sender.id if space_messages else None
-        if user_id is None:
+        # Check if the authenticated user participated in this space
+        user_participated = any(m.sender.id == user_id for m in space_messages)
+        if not user_participated:
             continue
         used_indices: set[int] = set()
         # Threaded
@@ -334,7 +335,7 @@ def group_all_conversations(
             )
         )
     if groups:
-        conversations.extend(group_group_conversations(groups, context_window))
+        conversations.extend(group_group_conversations(groups, context_window, user_id))
     logger.info(
         "Grouped %d messages into %d conversations", len(messages), len(conversations)
     )
