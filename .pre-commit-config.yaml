@@ -42,3 +42,4 @@ repos:
     hooks:
     - id: xenon
       args: ['--max-absolute=B', '--max-modules=B', '--max-average=B']
+      exclude: ^tests/
