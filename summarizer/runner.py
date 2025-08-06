@@ -79,6 +79,7 @@ def run_app(config: AppConfig, date_header: bool = False) -> None:
         context_window,
         user_id,
         include_passive=config.passive_participation,
+        client=webex_client.client,
     )
 
     # Improved conversation reporting
