@@ -192,11 +192,12 @@ class TestGroupingBugFix(unittest.TestCase):
         # Bob participates in both spaces, so he should appear in both
         for conversation in other_conversations:
             participant_names = {p.display_name for p in conversation.participants}
-            # Bob should be in the other space conversation since he sent a message there
+            # Bob should be in the other space since he sent a message there
             self.assertIn(
                 "Bob Johnson",
                 participant_names,
-                f"Other space conversation should contain Bob Johnson: {participant_names}",
+                f"Other space conversation should contain Bob Johnson: "
+                f"{participant_names}",
             )
 
     def test_single_space_grouping_still_works(self) -> None:
@@ -235,7 +236,7 @@ class TestGroupingBugFix(unittest.TestCase):
         self.assertEqual(conversation.space_type, SpaceType.GROUP)
 
     def test_non_participant_conversation_leak_bug(self) -> None:
-        """Test that conversations are not created when authenticated user is not a participant.
+        """Test conversations are not created when user is not a participant.
 
         This test reproduces the bug where conversations are displayed even when
         the authenticated user (Bob Johnson) is not one of the participants.
@@ -267,7 +268,7 @@ class TestGroupingBugFix(unittest.TestCase):
                 sender=user_g,
                 recipients=[],
                 timestamp=datetime(2025, 8, 6, 12, 0, 55),
-                content="this was great! Big thanks to everyone who helped guide us through. 🩷",
+                content="this was great! Big thanks to everyone who helped guide us.",
             ),
         ]
 
@@ -294,17 +295,17 @@ class TestGroupingBugFix(unittest.TestCase):
         self.assertEqual(
             len(external_conversations),
             0,
-            f"Should not create conversations where authenticated user is not a participant. "
+            "Should not create conversations where user is not a participant. "
             f"Found {len(external_conversations)} conversations in External space "
-            f"where Bob Johnson is not a participant.",
+            "where Bob Johnson is not a participant.",
         )
 
-        # Verify that conversations are still created for spaces where Bob IS a participant
+        # Verify conversations are still created for spaces where Bob IS a participant
         askcx_conversations = [c for c in conversations if c.space_id == "space_askcx"]
         self.assertGreater(
             len(askcx_conversations),
             0,
-            "Should still create conversations where authenticated user IS a participant",
+            "Should still create conversations where authenticated user participates",
         )
 
 
