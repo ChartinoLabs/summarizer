@@ -98,6 +98,11 @@ class WebexClient:
         self._client = client or WebexAPI(access_token=config.webex_token)
         self._me: Person | None = None
 
+    @property
+    def client(self) -> WebexAPI:
+        """Get the underlying WebexAPI client."""
+        return self._client
+
     def get_me(self) -> User:
         """Get user information as a User dataclass."""
         if not self._me:
