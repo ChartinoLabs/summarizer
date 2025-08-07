@@ -66,7 +66,12 @@ def display_conversations(
         console.print("[yellow]No conversations found.[/]")
         return
 
-    for convo in conversations:
+    # Sort conversations by start time (earliest to latest)
+    sorted_conversations = sorted(
+        conversations, key=lambda conv: conv.start_time or datetime.min
+    )
+
+    for convo in sorted_conversations:
         # Header with stats
         start_fmt = _format_time(convo.start_time, time_display_format)
         end_fmt = _format_time(convo.end_time, time_display_format)
