@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from datetime import datetime
-from typing import Iterable, Literal
+from typing import Literal
 
 from summarizer.common.config import BaseConfig
 from summarizer.common.models import ChangeType
@@ -40,8 +41,10 @@ class GithubConfig(BaseConfig):
         """Initialize GitHub configuration.
 
         Notes:
-            - user_email is not relevant for GitHub; it is accepted to satisfy BaseConfig.
-            - If github_token is None, this config indicates GitHub is inactive.
+            - user_email is not relevant for GitHub; it is accepted to
+              satisfy BaseConfig.
+            - If github_token is None, this config indicates GitHub is
+              inactive.
         """
         super().__init__(
             user_email=user_email,
@@ -66,7 +69,8 @@ class GithubConfig(BaseConfig):
         target_date: datetime,
         user_email: str = "",
         env: dict[str, str] | None = None,
-    ) -> "GithubConfig":
+    ) -> GithubConfig:
+        """Build a config from environment-like mappings."""
         e = env or {}
         token = e.get("GITHUB_TOKEN")
         api_url = e.get("GITHUB_API_URL", "https://api.github.com")
@@ -75,7 +79,9 @@ class GithubConfig(BaseConfig):
         org_filters = _normalize_repeatable(e.get("GITHUB_ORGS"))
         repo_filters = _normalize_repeatable(e.get("GITHUB_REPOS"))
         include_raw = _normalize_repeatable(e.get("GITHUB_INCLUDE"))
-        include_types = _parse_include_types(include_raw) if include_raw else set(ChangeType)
+        include_types = (
+            _parse_include_types(include_raw) if include_raw else set(ChangeType)
+        )
         safe_rate = e.get("GITHUB_SAFE_RATE", "false").lower() in {"1", "true", "yes"}
         return cls(
             github_token=token,
@@ -95,6 +101,7 @@ class GithubConfig(BaseConfig):
         return bool(self.github_token)
 
     def get_platform_name(self) -> str:
+        """Return platform name for display/logging."""
         return "github"
 
 
@@ -145,5 +152,3 @@ def _parse_include_types(raw: list[str]) -> set[ChangeType]:
             # Unknown value → ignore rather than raising; keeps CLI forgiving
             pass
     return include
-
-

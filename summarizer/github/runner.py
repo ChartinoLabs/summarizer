@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime, timedelta, tzinfo
+from datetime import UTC, datetime, timedelta
 
 from summarizer.common.console_ui import console
 from summarizer.common.runner import BaseRunner
@@ -21,22 +21,27 @@ class GithubRunner(BaseRunner):
     """
 
     def __init__(self, config: GithubConfig) -> None:
+        """Initialize the GitHub runner with `GithubConfig`."""
         super().__init__(config)
         self.config: GithubConfig = config
         self.client: GithubClient | None = None
 
     def connect(self) -> None:
+        """Connect to GitHub and validate credentials."""
         self.client = GithubClient(self.config)
         try:
             identity = self.client.get_viewer()
         except Exception as exc:  # refined auth errors will be implemented later
-            console.print("\n[bold red]Error: Invalid GitHub credentials or endpoint.[/]")
+            console.print(
+                "\n[bold red]Error: Invalid GitHub credentials or endpoint.[/]"
+            )
             logger.error("GitHub authentication failed: %s", exc)
             raise
         console.log(f"Connected to GitHub as [bold green]{identity.login}[/]")
 
     # Override BaseRunner.run to avoid conversation grouping
     def run(self, date_header: bool = False) -> None:  # type: ignore[override]
+        """Execute the GitHub flow for a single date."""
         local_tz = datetime.now().astimezone().tzinfo or UTC
         if date_header:
             from summarizer.common.console_ui import print_date_header
@@ -65,5 +70,3 @@ class GithubRunner(BaseRunner):
         for ch in changes:
             ts = ch.timestamp.astimezone(local_tz).strftime("%Y-%m-%d %H:%M:%S")
             console.print(f"- [{ch.type.value}] {ts} {ch.repo_full_name}: {ch.title}")
-
-

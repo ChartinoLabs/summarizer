@@ -7,8 +7,7 @@ implemented in a later task along with GraphQL/REST mapping.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Iterable, List
+from datetime import UTC, datetime
 
 from summarizer.common.models import Change
 from summarizer.github.config import GithubConfig
@@ -16,6 +15,8 @@ from summarizer.github.config import GithubConfig
 
 @dataclass
 class Identity:
+    """Authenticated GitHub identity information."""
+
     login: str
 
 
@@ -28,6 +29,7 @@ class GithubClient:
     """
 
     def __init__(self, config: GithubConfig) -> None:
+        """Initialize the client with a `GithubConfig`."""
         self.config = config
 
     # Connection / identity
@@ -36,15 +38,14 @@ class GithubClient:
         raise NotImplementedError
 
     # Activity collection
-    def get_changes(self, start: datetime, end: datetime) -> List[Change]:
+    def get_changes(self, start: datetime, end: datetime) -> list[Change]:
         """Return changes between [start, end)."""
         raise NotImplementedError
 
     # Utilities
     @staticmethod
     def to_utc_iso(dt: datetime) -> str:
+        """Convert a datetime to an ISO-8601 UTC string."""
         if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return dt.astimezone(timezone.utc).isoformat()
-
-
+            dt = dt.replace(tzinfo=UTC)
+        return dt.astimezone(UTC).isoformat()

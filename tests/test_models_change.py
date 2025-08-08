@@ -1,9 +1,12 @@
+"""Tests for the Change dataclass."""
+
 from datetime import datetime
 
 from summarizer.common.models import Change, ChangeType
 
 
-def test_change_model_basics():
+def test_change_model_basics() -> None:
+    """Ensure Change dataclass stores attributes as expected."""
     ch = Change(
         id="1",
         type=ChangeType.COMMIT,
@@ -16,5 +19,3 @@ def test_change_model_basics():
     )
     assert ch.type is ChangeType.COMMIT
     assert ch.metadata["sha"] == "deadbeef"
-
-
