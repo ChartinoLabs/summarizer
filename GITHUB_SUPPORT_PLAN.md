@@ -131,7 +131,7 @@ These functions do not affect existing Webex display.
 
 - `GithubRunner(BaseRunner)`:
   - `connect()`: validate token by calling `viewer` and resolve `user` login
-  - `run(date_header: bool)`: 
+  - `run(date_header: bool)`:
     - determine `[from, to)` bounds for single date (local midnight to midnight next day) or per-day iteration via CLI
     - fetch contributions and comments
     - map to `Change` objects
@@ -261,7 +261,7 @@ def test_github_cli_parses_minimal(monkeypatch):
     result = runner.invoke(
         app,
         [
-            "--github-token", "t", 
+            "--github-token", "t",
             "--target-date", "2024-07-01",
         ],
     )
@@ -295,4 +295,3 @@ def test_maps_contributions_to_changes(monkeypatch):
 - Fine-grained branch-scoped commit filtering beyond repo constraints
 - Full-text content rendering beyond short summaries
 - Cross-day grouping of changes
-
