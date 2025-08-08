@@ -77,6 +77,17 @@ class GithubClient:
         changes.extend(self._collect_pull_requests(coll))
         changes.extend(self._collect_reviews(coll))
         changes.extend(self._collect_commits(coll))
+
+        # REST fallbacks for comments (issue comments and PR review comments)
+        repos = self._discover_repos_from_contributions(coll)
+        repos.update(self.config.repo_filters or [])
+        viewer_login = self.config.user or self.get_viewer().login
+        if ChangeType.ISSUE_COMMENT in set(self.config.include_types):
+            changes.extend(self._fetch_issue_comments(repos, start, end, viewer_login))
+        if ChangeType.PR_COMMENT in set(self.config.include_types):
+            changes.extend(
+                self._fetch_pr_review_comments(repos, start, end, viewer_login)
+            )
         changes.sort(key=lambda ch: ch.timestamp)
         return changes
 
@@ -235,6 +246,159 @@ class GithubClient:
                     )
                 )
         return results
+
+    def _discover_repos_from_contributions(self, coll: dict[str, Any]) -> set[str]:
+        return set(self._iter_repo_names(coll))
+
+    @staticmethod
+    def _iter_repo_names(coll: dict[str, Any]) -> list[str]:
+        repos: list[str] = []
+        for node in coll.get("issueContributions", {}).get("nodes", []):
+            issue = node.get("issue") or {}
+            repo = issue.get("repository", {}).get("nameWithOwner")
+            if repo:
+                repos.append(repo)
+        for node in coll.get("pullRequestContributions", {}).get("nodes", []):
+            pr = node.get("pullRequest") or {}
+            repo = pr.get("repository", {}).get("nameWithOwner")
+            if repo:
+                repos.append(repo)
+        for node in coll.get("pullRequestReviewContributions", {}).get("nodes", []):
+            pr = node.get("pullRequest") or {}
+            repo = pr.get("repository", {}).get("nameWithOwner")
+            if repo:
+                repos.append(repo)
+        for repo_contrib in coll.get("commitContributionsByRepository", []):
+            repo = repo_contrib.get("repository", {}).get("nameWithOwner")
+            if repo:
+                repos.append(repo)
+        return repos
+
+    def _fetch_issue_comments(
+        self,
+        repos: set[str],
+        start: datetime,
+        end: datetime,
+        viewer_login: str,
+    ) -> list[Change]:
+        results: list[Change] = []
+        headers = {
+            "Authorization": f"Bearer {self.config.github_token}",
+            "Accept": "application/vnd.github+json",
+        }
+        start_utc = self._ensure_utc(start)
+        end_utc = self._ensure_utc(end)
+        since = self.to_utc_iso(start_utc)
+        for full in repos:
+            owner, name = full.split("/", 1)
+            url = f"{self.config.api_url}/repos/{owner}/{name}/issues/comments"
+            next_url = f"{url}?since={since}"
+            while next_url:
+                resp = requests.get(next_url, headers=headers, timeout=60)
+                if resp.status_code == 401:
+                    raise ValueError("Unauthorized: invalid GitHub token")
+                items = resp.json() if isinstance(resp.json(), list) else []
+                for it in items:
+                    created = self._parse_iso(it.get("created_at"))
+                    user = (it.get("user") or {}).get("login")
+                    if not created or not (start_utc <= created < end_utc):
+                        continue
+                    if user != viewer_login:
+                        continue
+                    issue_url = it.get("issue_url", "")
+                    num = self._extract_number(issue_url)
+                    title = (
+                        f"Commented on issue #{num}" if num else "Commented on issue"
+                    )
+                    results.append(
+                        Change(
+                            id=str(it.get("id", "")),
+                            type=ChangeType.ISSUE_COMMENT,
+                            timestamp=created,
+                            repo_full_name=full,
+                            title=title,
+                            url=it.get("html_url", ""),
+                        )
+                    )
+                next_url = self._next_link(resp.headers.get("Link"))
+        return results
+
+    def _fetch_pr_review_comments(
+        self,
+        repos: set[str],
+        start: datetime,
+        end: datetime,
+        viewer_login: str,
+    ) -> list[Change]:
+        results: list[Change] = []
+        headers = {
+            "Authorization": f"Bearer {self.config.github_token}",
+            "Accept": "application/vnd.github+json",
+        }
+        start_utc = self._ensure_utc(start)
+        end_utc = self._ensure_utc(end)
+        since = self.to_utc_iso(start_utc)
+        for full in repos:
+            owner, name = full.split("/", 1)
+            url = f"{self.config.api_url}/repos/{owner}/{name}/pulls/comments"
+            next_url = f"{url}?since={since}"
+            while next_url:
+                resp = requests.get(next_url, headers=headers, timeout=60)
+                if resp.status_code == 401:
+                    raise ValueError("Unauthorized: invalid GitHub token")
+                items = resp.json() if isinstance(resp.json(), list) else []
+                for it in items:
+                    created = self._parse_iso(it.get("created_at"))
+                    user = (it.get("user") or {}).get("login")
+                    if not created or not (start_utc <= created < end_utc):
+                        continue
+                    if user != viewer_login:
+                        continue
+                    pr_url = it.get("pull_request_url", "")
+                    num = self._extract_number(pr_url)
+                    title = f"Commented on PR #{num}" if num else "Commented on PR"
+                    results.append(
+                        Change(
+                            id=str(it.get("id", "")),
+                            type=ChangeType.PR_COMMENT,
+                            timestamp=created,
+                            repo_full_name=full,
+                            title=title,
+                            url=it.get("html_url", ""),
+                        )
+                    )
+                next_url = self._next_link(resp.headers.get("Link"))
+        return results
+
+    @staticmethod
+    def _next_link(link_header: str | None) -> str | None:
+        if not link_header:
+            return None
+        # Minimal RFC5988 Link header parser for rel="next"
+        parts = link_header.split(",")
+        for p in parts:
+            if 'rel="next"' in p:
+                start = p.find("<")
+                end = p.find(">", start + 1)
+                if start != -1 and end != -1:
+                    return p[start + 1 : end]
+        return None
+
+    @staticmethod
+    def _extract_number(api_url: str | None) -> str | None:
+        if not api_url:
+            return None
+        try:
+            # Issue URL ends with /issues/{number} or PR URL with /pulls/{number}
+            return api_url.rstrip("/").split("/")[-1]
+        except Exception:
+            return None
+
+    @staticmethod
+    def _ensure_utc(dt: datetime) -> datetime:
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=UTC)
+        return dt.astimezone(UTC)
 
     # ---------------
     # Helper methods
