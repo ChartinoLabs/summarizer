@@ -1,4 +1,4 @@
-"""Tests for GithubConfig env parsing and defaults."""
+"""Tests for GithubConfig construction and defaults."""
 
 from datetime import datetime
 
@@ -6,9 +6,12 @@ from summarizer.common.models import ChangeType
 from summarizer.github.config import GithubConfig
 
 
-def test_from_env_defaults() -> None:
-    """Defaults should be sensible when env is empty."""
-    cfg = GithubConfig.from_env(target_date=datetime(2024, 7, 1), env={})
+def test_defaults_with_minimal_input() -> None:
+    """Defaults should be sensible when minimal arguments are provided."""
+    cfg = GithubConfig(
+        github_token=None,
+        target_date=datetime(2024, 7, 1),
+    )
     assert cfg.github_token is None
     assert cfg.api_url == "https://api.github.com"
     assert cfg.graphql_url == "https://api.github.com/graphql"
@@ -17,20 +20,19 @@ def test_from_env_defaults() -> None:
     assert set(cfg.include_types) == set(ChangeType)
 
 
-def test_from_env_parsing_include_and_filters() -> None:
-    """Env values should be parsed correctly, including synonyms and filters."""
-    env = {
-        "GITHUB_TOKEN": "t",
-        "GITHUB_API_URL": "https://ghe.example.com/api/v3",
-        "GITHUB_GRAPHQL_URL": "https://ghe.example.com/api/graphql",
-        "GITHUB_USER": "octo",
-        "GITHUB_ORGS": "one, two",
-        "GITHUB_REPOS": "a/b, c/d",
-        # 'prs' should be normalized to pull_request
-        "GITHUB_INCLUDE": "commit,prs,issue_comment",
-        "GITHUB_SAFE_RATE": "true",
-    }
-    cfg = GithubConfig.from_env(target_date=datetime(2024, 7, 1), env=env)
+def test_explicit_args_and_filters() -> None:
+    """Explicit arguments should populate fields; include_types passed directly."""
+    cfg = GithubConfig(
+        github_token="t",
+        target_date=datetime(2024, 7, 1),
+        api_url="https://ghe.example.com/api/v3",
+        graphql_url="https://ghe.example.com/api/graphql",
+        user="octo",
+        org_filters=["one", "two"],
+        repo_filters=["a/b", "c/d"],
+        include_types=[ChangeType.COMMIT, ChangeType.PULL_REQUEST],
+        safe_rate=True,
+    )
     assert cfg.is_active() is True
     assert cfg.github_token == "t"
     assert cfg.api_url == "https://ghe.example.com/api/v3"
@@ -39,6 +41,4 @@ def test_from_env_parsing_include_and_filters() -> None:
     assert cfg.org_filters == ["one", "two"]
     assert cfg.repo_filters == ["a/b", "c/d"]
     assert cfg.safe_rate is True
-    # include normalization: unsupported alias 'prs' should not break; ensure at
-    # least COMMIT present
-    assert ChangeType.COMMIT in cfg.include_types
+    assert cfg.include_types == {ChangeType.COMMIT, ChangeType.PULL_REQUEST}
