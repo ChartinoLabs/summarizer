@@ -7,7 +7,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from .models import Conversation
+from summarizer.common.models import Conversation
 
 console = Console()
 

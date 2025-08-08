@@ -3,8 +3,8 @@
 import unittest
 from datetime import datetime, timedelta
 
-from summarizer.grouping import group_group_conversations
-from summarizer.models import Message, SpaceType, User
+from summarizer.common.grouping import group_group_conversations
+from summarizer.common.models import Message, SpaceType, User
 
 
 class TestGroupingBugFix(unittest.TestCase):

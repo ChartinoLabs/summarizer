@@ -8,9 +8,9 @@ from typing import Annotated
 import typer
 from dotenv import load_dotenv
 
-from summarizer.config import AppConfig
-from summarizer.logging import setup_logging
-from summarizer.runner import run_app
+from summarizer.common.logging import setup_logging
+from summarizer.webex.config import WebexConfig
+from summarizer.webex.runner import WebexRunner
 
 # Load environment variables from .env before initializing the Typer app
 load_dotenv()
@@ -105,7 +105,7 @@ def _validate_and_parse_dates(
 
 
 def _run_for_date(
-    config: AppConfig,
+    config: WebexConfig,
     date_header: bool,
 ) -> None:
     logger.info("Attempting to log into Webex API as user %s", config.user_email)
@@ -114,7 +114,8 @@ def _run_for_date(
     logger.info("Passive participation: %s", config.passive_participation)
     logger.info("Time display format: %s", config.time_display_format)
     logger.info("Room fetch chunk size: %d", config.room_chunk_size)
-    run_app(config, date_header=date_header)
+    runner = WebexRunner(config)
+    runner.run(date_header=date_header)
 
 
 @app.command()
@@ -195,7 +196,7 @@ def main(
                 "Both start_date and end_date must be provided for range mode"
             )
         while current <= parsed_end_date:
-            config = AppConfig(
+            config = WebexConfig(
                 webex_token=webex_token,
                 user_email=user_email,
                 target_date=current,
@@ -211,8 +212,8 @@ def main(
     # Single date mode
     if parsed_target_date is None:
         raise ValueError("Target date must be provided for single date mode")
-    # Construct AppConfig for a single date
-    config = AppConfig(
+    # Construct WebexConfig for a single date
+    config = WebexConfig(
         webex_token=webex_token,
         user_email=user_email,
         target_date=parsed_target_date,

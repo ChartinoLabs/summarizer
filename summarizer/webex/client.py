@@ -11,9 +11,9 @@ from webexpythonsdk import WebexAPI
 from webexpythonsdk.exceptions import ApiError
 from webexpythonsdk.models.immutable import Message as SDKMessage, Person, Room
 
-from .config import AppConfig
-from .console_ui import console
-from .models import Message, SpaceType, User
+from summarizer.common.console_ui import console
+from summarizer.common.models import Message, SpaceType, User
+from summarizer.webex.config import WebexConfig
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +92,7 @@ class MessageAnalysisResult:
 class WebexClient:
     """Wrapper around Webex API client."""
 
-    def __init__(self, config: AppConfig, client: WebexAPI | None = None) -> None:
+    def __init__(self, config: WebexConfig, client: WebexAPI | None = None) -> None:
         """Initialize with configuration."""
         self.config = config
         self._client = client or WebexAPI(access_token=config.webex_token)
