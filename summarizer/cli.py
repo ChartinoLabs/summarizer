@@ -9,6 +9,9 @@ import typer
 from dotenv import load_dotenv
 
 from summarizer.common.logging import setup_logging
+from summarizer.common.models import ChangeType
+from summarizer.github.config import GithubConfig
+from summarizer.github.runner import GithubRunner
 from summarizer.webex.config import WebexConfig
 from summarizer.webex.runner import WebexRunner
 
@@ -104,10 +107,7 @@ def _validate_and_parse_dates(
     return parsed_date, None, None, "single"
 
 
-def _run_for_date(
-    config: WebexConfig,
-    date_header: bool,
-) -> None:
+def _run_webex_for_date(config: WebexConfig, date_header: bool) -> None:
     logger.info("Attempting to log into Webex API as user %s", config.user_email)
     logger.info("Targeted date for summarization: %s", config.target_date)
     logger.info("Context window size: %d minutes", config.context_window_minutes)
@@ -118,24 +118,136 @@ def _run_for_date(
     runner.run(date_header=date_header)
 
 
+def _run_github_for_date(config: GithubConfig, date_header: bool) -> None:
+    logger.info("Attempting to access GitHub as user %s", config.user)
+    logger.info("Targeted date for summarization: %s", config.target_date)
+    runner = GithubRunner(config)
+    runner.run(date_header=date_header)
+
+
+_INCLUDE_SYNONYMS: dict[str, ChangeType] = {
+    "commit": ChangeType.COMMIT,
+    "commits": ChangeType.COMMIT,
+    "issue": ChangeType.ISSUE,
+    "issues": ChangeType.ISSUE,
+    "pr": ChangeType.PULL_REQUEST,
+    "prs": ChangeType.PULL_REQUEST,
+    "pull_request": ChangeType.PULL_REQUEST,
+    "pull_requests": ChangeType.PULL_REQUEST,
+    "issue_comment": ChangeType.ISSUE_COMMENT,
+    "issue_comments": ChangeType.ISSUE_COMMENT,
+    "pr_comment": ChangeType.PR_COMMENT,
+    "pr_comments": ChangeType.PR_COMMENT,
+    "pull_request_comment": ChangeType.PR_COMMENT,
+    "pull_request_comments": ChangeType.PR_COMMENT,
+    "review": ChangeType.REVIEW,
+    "reviews": ChangeType.REVIEW,
+}
+
+
+def _parse_change_types(values: list[str] | None) -> set[ChangeType]:
+    if not values:
+        return set(ChangeType)
+    result: set[ChangeType] = set()
+    for v in values:
+        key = (v or "").strip().lower()
+        if not key:
+            continue
+        ct = _INCLUDE_SYNONYMS.get(key)
+        if ct is not None:
+            result.add(ct)
+            continue
+        try:
+            result.add(ChangeType[key.upper()])
+        except Exception:
+            # ignore unknown values
+            pass
+    return result or set(ChangeType)
+
+
+def _build_webex_config(
+    *,
+    date: datetime,
+    webex_token: str | None,
+    user_email: str | None,
+    context_window_minutes: int,
+    passive_participation: bool,
+    time_display_format: TimeDisplayFormat,
+    room_chunk_size: int,
+) -> WebexConfig:
+    return WebexConfig(
+        webex_token=webex_token or "",
+        user_email=user_email or "",
+        target_date=date,
+        context_window_minutes=context_window_minutes,
+        passive_participation=passive_participation,
+        time_display_format=time_display_format.value,
+        room_chunk_size=room_chunk_size,
+    )
+
+
+def _build_github_config(
+    *,
+    date: datetime,
+    github_token: str | None,
+    github_api_url: str,
+    github_graphql_url: str | None,
+    github_user: str | None,
+    org: list[str] | None,
+    repo: list[str] | None,
+    include_types: set[ChangeType],
+    safe_rate: bool,
+) -> GithubConfig:
+    return GithubConfig(
+        github_token=github_token,
+        target_date=date,
+        api_url=github_api_url,
+        graphql_url=github_graphql_url,
+        user=github_user,
+        org_filters=org or [],
+        repo_filters=repo or [],
+        include_types=include_types,
+        safe_rate=safe_rate,
+    )
+
+
+def _execute_for_date(
+    *,
+    date: datetime,
+    webex_active: bool,
+    github_active: bool,
+    webex_args: dict,
+    github_args: dict,
+) -> None:
+    from summarizer.common.console_ui import print_date_header
+
+    print_date_header(date)
+    if webex_active:
+        wcfg = _build_webex_config(date=date, **webex_args)
+        _run_webex_for_date(wcfg, date_header=False)
+    if github_active:
+        gcfg = _build_github_config(date=date, **github_args)
+        _run_github_for_date(gcfg, date_header=False)
+
+
 @app.command()
 def main(
+    # Webex (optional)
     user_email: Annotated[
-        str,
-        typer.Option(..., envvar="USER_EMAIL", prompt="Enter your Cisco email"),
-    ],
+        str | None,
+        typer.Option(None, envvar="USER_EMAIL", help="Webex user email"),
+    ] = None,
     webex_token: Annotated[
-        str,
+        str | None,
         typer.Option(
-            ...,
+            None,
             envvar="WEBEX_TOKEN",
-            prompt=(
-                "Enter your Webex access token "
-                "(https://developer.webex.com/docs/getting-started)"
+            help=(
+                "Webex access token (see https://developer.webex.com/docs/getting-started)"
             ),
             hide_input=True,
         ),
-    ],
+    ] = None,
     debug: Annotated[bool, typer.Option(help="Enable debug logging")] = False,
     target_date: Annotated[
         str | None,
@@ -178,8 +290,56 @@ def main(
         TimeDisplayFormat, typer.Option(help="Time display format ('12h' or '24h')")
     ] = TimeDisplayFormat.h12,
     room_chunk_size: Annotated[int, typer.Option(help="Room fetch chunk size")] = 50,
+    # GitHub (all optional; presence of token activates)
+    github_token: Annotated[
+        str | None,
+        typer.Option(None, envvar="GITHUB_TOKEN", help="GitHub token"),
+    ] = None,
+    github_api_url: Annotated[
+        str,
+        typer.Option(
+            "https://api.github.com",
+            envvar="GITHUB_API_URL",
+            help="GitHub REST API base URL",
+        ),
+    ] = "https://api.github.com",
+    github_graphql_url: Annotated[
+        str | None,
+        typer.Option(None, envvar="GITHUB_GRAPHQL_URL", help="GitHub GraphQL URL"),
+    ] = None,
+    github_user: Annotated[
+        str | None,
+        typer.Option(None, envvar="GITHUB_USER", help="GitHub login (optional)"),
+    ] = None,
+    org: Annotated[
+        list[str] | None,
+        typer.Option(
+            None,
+            "--org",
+            help="Restrict GitHub to these orgs (repeatable)",
+        ),
+    ] = None,
+    repo: Annotated[
+        list[str] | None,
+        typer.Option(
+            None,
+            "--repo",
+            help="Restrict GitHub to these repos (owner/name) (repeatable)",
+        ),
+    ] = None,
+    include: Annotated[
+        list[str] | None,
+        typer.Option(None, "--include", help="Which change types to include"),
+    ] = None,
+    exclude: Annotated[
+        list[str] | None,
+        typer.Option(None, "--exclude", help="Which change types to exclude"),
+    ] = None,
+    safe_rate: Annotated[
+        bool, typer.Option(help="Back off when GitHub rate is low")
+    ] = False,
 ) -> None:
-    """Webex Summarizer CLI (Typer config parsing demo)."""
+    """Summarizer CLI (unified Webex + GitHub)."""
     if debug is True:
         logger.setLevel(logging.DEBUG)
         logger.debug("Debug logging enabled")
@@ -188,6 +348,15 @@ def main(
         _validate_and_parse_dates(target_date, start_date, end_date)
     )
 
+    webex_active = bool(webex_token and user_email)
+    github_active = bool(github_token)
+    if not webex_active and not github_active:
+        typer.echo(
+            "[red]No platform credentials provided. Provide Webex and/or GitHub "
+            "credentials.[/red]"
+        )
+        raise typer.Exit(1)
+
     if mode == "range":
         # Iterate over date range (inclusive)
         current = parsed_start_date
@@ -195,34 +364,70 @@ def main(
             raise ValueError(
                 "Both start_date and end_date must be provided for range mode"
             )
+        include_types = _parse_change_types(include)
+        exclude_types = _parse_change_types(exclude)
+        active_types = include_types - exclude_types
+        webex_args = dict(
+            webex_token=webex_token,
+            user_email=user_email,
+            context_window_minutes=context_window_minutes,
+            passive_participation=passive_participation,
+            time_display_format=time_display_format,
+            room_chunk_size=room_chunk_size,
+        )
+        github_args = dict(
+            github_token=github_token,
+            github_api_url=github_api_url,
+            github_graphql_url=github_graphql_url,
+            github_user=github_user,
+            org=org,
+            repo=repo,
+            include_types=active_types,
+            safe_rate=safe_rate,
+        )
         while current <= parsed_end_date:
-            config = WebexConfig(
-                webex_token=webex_token,
-                user_email=user_email,
-                target_date=current,
-                context_window_minutes=context_window_minutes,
-                passive_participation=passive_participation,
-                time_display_format=time_display_format.value,
-                room_chunk_size=room_chunk_size,
+            _execute_for_date(
+                date=current,
+                webex_active=webex_active,
+                github_active=github_active,
+                webex_args=webex_args,
+                github_args=github_args,
             )
-            _run_for_date(config, date_header=True)
             current += timedelta(days=1)
         return
 
     # Single date mode
     if parsed_target_date is None:
         raise ValueError("Target date must be provided for single date mode")
-    # Construct WebexConfig for a single date
-    config = WebexConfig(
+    # Single date: print date header once and run selected platforms
+    include_types = _parse_change_types(include)
+    exclude_types = _parse_change_types(exclude)
+    active_types = include_types - exclude_types
+    webex_args = dict(
         webex_token=webex_token,
         user_email=user_email,
-        target_date=parsed_target_date,
         context_window_minutes=context_window_minutes,
         passive_participation=passive_participation,
-        time_display_format=time_display_format.value,
+        time_display_format=time_display_format,
         room_chunk_size=room_chunk_size,
     )
-    _run_for_date(config, date_header=False)
+    github_args = dict(
+        github_token=github_token,
+        github_api_url=github_api_url,
+        github_graphql_url=github_graphql_url,
+        github_user=github_user,
+        org=org,
+        repo=repo,
+        include_types=active_types,
+        safe_rate=safe_rate,
+    )
+    _execute_for_date(
+        date=parsed_target_date,
+        webex_active=webex_active,
+        github_active=github_active,
+        webex_args=webex_args,
+        github_args=github_args,
+    )
 
 
 if __name__ == "__main__":

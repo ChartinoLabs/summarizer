@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, tzinfo
 
-from summarizer.common.console_ui import console
+from summarizer.common.console_ui import (
+    console,
+    display_changes,
+    display_changes_summary,
+)
+from summarizer.common.models import Message
 from summarizer.common.runner import BaseRunner
 from summarizer.github.client import GithubClient
 from summarizer.github.config import GithubConfig
@@ -61,12 +66,14 @@ class GithubRunner(BaseRunner):
 
         changes = self.client.get_changes(start, end)
 
-        # Placeholder rendering until console helpers are added
-        if not changes:
-            console.print("[yellow]No GitHub changes found for this date.[/]")
-            return
+        display_changes(changes)
+        display_changes_summary(changes)
 
-        console.print(f"[bold]GitHub Changes:[/] {len(changes)} items")
-        for ch in changes:
-            ts = ch.timestamp.astimezone(local_tz).strftime("%Y-%m-%d %H:%M:%S")
-            console.print(f"- [{ch.type.value}] {ts} {ch.repo_full_name}: {ch.title}")
+    # Unused by GitHub runner; implemented to satisfy abstract base class
+    def get_activity(self, date: datetime, local_tz: tzinfo) -> list[Message]:  # type: ignore[override]
+        """Unused for GitHub; return empty list to satisfy base contract."""
+        return []
+
+    def get_user_id(self) -> str:  # type: ignore[override]
+        """Unused for GitHub; return configured login if present."""
+        return self.config.user or ""

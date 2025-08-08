@@ -1,5 +1,6 @@
 """Console UI components for webex-summarizer."""
 
+from collections import Counter
 from datetime import datetime, timedelta
 
 import humanize
@@ -7,7 +8,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from summarizer.common.models import Conversation
+from summarizer.common.models import Change, Conversation
 
 console = Console()
 
@@ -202,3 +203,61 @@ def print_date_header(date: datetime) -> None:
     console.print("\n" + top, style="bold blue")
     console.print(mid, style="bold white")
     console.print(bot, style="bold blue")
+
+
+# =============================
+# GitHub Changes UI components
+# =============================
+
+
+def display_changes(
+    changes: list[Change],
+    time_display_format: str = "12h",
+) -> None:
+    """Display a list of GitHub changes as a table."""
+    if not changes:
+        console.print("[yellow]No GitHub changes found.[/]")
+        return
+
+    # Sort by timestamp
+    sorted_changes = sorted(changes, key=lambda ch: ch.timestamp)
+
+    table = Table(show_header=True, title="GitHub Changes")
+    table.add_column("Time", style="cyan", no_wrap=True)
+    table.add_column("Type", style="magenta", no_wrap=True)
+    table.add_column("Repo", style="green", no_wrap=True)
+    table.add_column("Title", style="white", no_wrap=False, overflow="fold")
+
+    for ch in sorted_changes:
+        time_str = _format_time(ch.timestamp, time_display_format)
+        table.add_row(time_str, ch.type.value, ch.repo_full_name, ch.title)
+
+    console.print(table)
+
+
+def display_changes_summary(changes: list[Change]) -> None:
+    """Display a summary of GitHub changes by type and by repository."""
+    if not changes:
+        return
+
+    console.print("\n" + "=" * 80)
+    console.print("[bold cyan]GitHub Changes Summary[/]")
+    console.print("=" * 80)
+
+    # Counts by type
+    by_type = Counter(ch.type.value for ch in changes)
+    type_table = Table(show_header=True, title="By Type")
+    type_table.add_column("Type", style="magenta", no_wrap=True)
+    type_table.add_column("Count", style="yellow", no_wrap=True)
+    for t, c in sorted(by_type.items()):
+        type_table.add_row(t, str(c))
+    console.print(type_table)
+
+    # Counts by repo
+    by_repo = Counter(ch.repo_full_name for ch in changes)
+    repo_table = Table(show_header=True, title="By Repository")
+    repo_table.add_column("Repository", style="green", no_wrap=True)
+    repo_table.add_column("Count", style="yellow", no_wrap=True)
+    for r, c in sorted(by_repo.items()):
+        repo_table.add_row(r, str(c))
+    console.print(repo_table)
