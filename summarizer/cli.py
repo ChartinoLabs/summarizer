@@ -315,7 +315,6 @@ def main(
         list[str] | None,
         typer.Option(
             None,
-            "--org",
             help="Restrict GitHub to these orgs (repeatable)",
         ),
     ] = None,
@@ -323,17 +322,16 @@ def main(
         list[str] | None,
         typer.Option(
             None,
-            "--repo",
             help="Restrict GitHub to these repos (owner/name) (repeatable)",
         ),
     ] = None,
     include: Annotated[
         list[str] | None,
-        typer.Option(None, "--include", help="Which change types to include"),
+        typer.Option(None, help="Which change types to include"),
     ] = None,
     exclude: Annotated[
         list[str] | None,
-        typer.Option(None, "--exclude", help="Which change types to exclude"),
+        typer.Option(None, help="Which change types to exclude"),
     ] = None,
     safe_rate: Annotated[
         bool, typer.Option(help="Back off when GitHub rate is low")

@@ -137,5 +137,3 @@ def test_pr_review_comments_filtered_by_user_and_time() -> None:
     pr_comments = [c for c in changes if c.type is ChangeType.PR_COMMENT]
     assert len(pr_comments) == 1
     assert pr_comments[0].title.startswith("Commented on PR #42")
-
-
