@@ -165,6 +165,13 @@ def _parse_change_types(values: list[str] | None) -> set[ChangeType]:
     return result or set(ChangeType)
 
 
+def _split_csv(value: str | None) -> list[str] | None:
+    if value is None:
+        return None
+    parts = [p.strip() for p in value.replace("\n", ",").split(",")]
+    return [p for p in parts if p]
+
+
 def _build_webex_config(
     *,
     date: datetime,
@@ -235,12 +242,11 @@ def main(
     # Webex (optional)
     user_email: Annotated[
         str | None,
-        typer.Option(None, envvar="USER_EMAIL", help="Webex user email"),
+        typer.Option(envvar="USER_EMAIL", help="Webex user email"),
     ] = None,
     webex_token: Annotated[
         str | None,
         typer.Option(
-            None,
             envvar="WEBEX_TOKEN",
             help=(
                 "Webex access token (see https://developer.webex.com/docs/getting-started)"
@@ -293,45 +299,56 @@ def main(
     # GitHub (all optional; presence of token activates)
     github_token: Annotated[
         str | None,
-        typer.Option(None, envvar="GITHUB_TOKEN", help="GitHub token"),
+        typer.Option(envvar="GITHUB_TOKEN", help="GitHub token"),
     ] = None,
     github_api_url: Annotated[
         str,
         typer.Option(
-            "https://api.github.com",
             envvar="GITHUB_API_URL",
             help="GitHub REST API base URL",
         ),
     ] = "https://api.github.com",
     github_graphql_url: Annotated[
         str | None,
-        typer.Option(None, envvar="GITHUB_GRAPHQL_URL", help="GitHub GraphQL URL"),
+        typer.Option(
+            envvar="GITHUB_GRAPHQL_URL",
+            help="GitHub GraphQL URL",
+        ),
     ] = None,
     github_user: Annotated[
         str | None,
-        typer.Option(None, envvar="GITHUB_USER", help="GitHub login (optional)"),
+        typer.Option(
+            envvar="GITHUB_USER",
+            help="GitHub login (optional)",
+        ),
     ] = None,
     org: Annotated[
-        list[str] | None,
+        str | None,
         typer.Option(
-            None,
-            help="Restrict GitHub to these orgs (repeatable)",
+            "--org",
+            help="Restrict GitHub to these orgs (comma-separated)",
         ),
     ] = None,
     repo: Annotated[
-        list[str] | None,
+        str | None,
         typer.Option(
-            None,
-            help="Restrict GitHub to these repos (owner/name) (repeatable)",
+            "--repo",
+            help="Restrict GitHub to these repos (owner/name, comma-separated)",
         ),
     ] = None,
     include: Annotated[
-        list[str] | None,
-        typer.Option(None, help="Which change types to include"),
+        str | None,
+        typer.Option(
+            "--include",
+            help="Which change types to include (csv)",
+        ),
     ] = None,
     exclude: Annotated[
-        list[str] | None,
-        typer.Option(None, help="Which change types to exclude"),
+        str | None,
+        typer.Option(
+            "--exclude",
+            help="Which change types to exclude (csv)",
+        ),
     ] = None,
     safe_rate: Annotated[
         bool, typer.Option(help="Back off when GitHub rate is low")
@@ -362,8 +379,8 @@ def main(
             raise ValueError(
                 "Both start_date and end_date must be provided for range mode"
             )
-        include_types = _parse_change_types(include)
-        exclude_types = _parse_change_types(exclude)
+        include_types = _parse_change_types(_split_csv(include))
+        exclude_types = _parse_change_types(_split_csv(exclude))
         active_types = include_types - exclude_types
         webex_args = dict(
             webex_token=webex_token,
@@ -378,8 +395,8 @@ def main(
             github_api_url=github_api_url,
             github_graphql_url=github_graphql_url,
             github_user=github_user,
-            org=org,
-            repo=repo,
+            org=_split_csv(org),
+            repo=_split_csv(repo),
             include_types=active_types,
             safe_rate=safe_rate,
         )
@@ -398,8 +415,8 @@ def main(
     if parsed_target_date is None:
         raise ValueError("Target date must be provided for single date mode")
     # Single date: print date header once and run selected platforms
-    include_types = _parse_change_types(include)
-    exclude_types = _parse_change_types(exclude)
+    include_types = _parse_change_types(_split_csv(include))
+    exclude_types = _parse_change_types(_split_csv(exclude))
     active_types = include_types - exclude_types
     webex_args = dict(
         webex_token=webex_token,
@@ -414,8 +431,8 @@ def main(
         github_api_url=github_api_url,
         github_graphql_url=github_graphql_url,
         github_user=github_user,
-        org=org,
-        repo=repo,
+        org=_split_csv(org),
+        repo=_split_csv(repo),
         include_types=active_types,
         safe_rate=safe_rate,
     )
