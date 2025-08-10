@@ -363,7 +363,19 @@ def main(
 ) -> None:
     """Summarizer CLI (unified Webex + GitHub)."""
     if debug is True:
+        # Set debug level for all relevant loggers
+        logging.getLogger().setLevel(logging.DEBUG)
+        logging.getLogger("summarizer.github.client").setLevel(logging.DEBUG)
+        logging.getLogger("summarizer.github.runner").setLevel(logging.DEBUG)
         logger.setLevel(logging.DEBUG)
+
+        # Add console handler for debug output
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(logging.DEBUG)
+        console_formatter = logging.Formatter("%(name)s: %(levelname)s: %(message)s")
+        console_handler.setFormatter(console_formatter)
+        logging.getLogger().addHandler(console_handler)
+
         logger.debug("Debug logging enabled")
 
     parsed_target_date, parsed_start_date, parsed_end_date, mode = (

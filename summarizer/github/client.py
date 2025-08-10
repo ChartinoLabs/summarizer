@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import requests
@@ -121,8 +121,12 @@ class GithubClient:
         if ChangeType.COMMIT in set(self.config.include_types):
             # Replace basic commit data with detailed commit data
             changes = [c for c in changes if c.type != ChangeType.COMMIT]
+            # For commits, trust the GraphQL contributionsCollection date filtering
+            # and don't apply additional date filtering in REST API
             changes.extend(
-                self._fetch_detailed_commits(repos, start, end, viewer_login)
+                self._fetch_detailed_commits_no_date_filter(
+                    repos, start, end, viewer_login
+                )
             )
 
         if ChangeType.ISSUE_COMMENT in set(self.config.include_types):
@@ -188,6 +192,7 @@ class GithubClient:
             variables["from"],
             variables["to"],
         )
+
         resp = requests.post(
             self.config.graphql_url,
             json={"query": query, "variables": variables},
@@ -200,6 +205,59 @@ class GithubClient:
         if "errors" in data and data["errors"]:
             msg = data["errors"][0].get("message", "GraphQL error")
             raise ValueError(f"GitHub GraphQL error: {msg}")
+
+        # Production debug logging for GitHub GraphQL contributions
+        if "data" in data and "user" in data["data"]:
+            user_data = data["data"]["user"]
+            if user_data and "contributionsCollection" in user_data:
+                coll = user_data["contributionsCollection"]
+                logger.debug("GraphQL contributionsCollection analysis:")
+                logger.debug(
+                    "  Query range: %s to %s", variables["from"], variables["to"]
+                )
+
+                # Log contribution counts by type
+                issues_count = len(coll.get("issueContributions", {}).get("nodes", []))
+                prs_count = len(
+                    coll.get("pullRequestContributions", {}).get("nodes", [])
+                )
+                reviews_count = len(
+                    coll.get("pullRequestReviewContributions", {}).get("nodes", [])
+                )
+                commit_repos = coll.get("commitContributionsByRepository", [])
+                restricted_count = coll.get("restrictedContributionsCount", 0)
+
+                logger.debug(
+                    "  Contribution counts: issues=%d, prs=%d, reviews=%d, commit_repos=%d, restricted=%d",
+                    issues_count,
+                    prs_count,
+                    reviews_count,
+                    len(commit_repos),
+                    restricted_count,
+                )
+
+                # Log details for commit repositories (key for REST API discovery)
+                for i, repo_data in enumerate(commit_repos):
+                    repo_name = repo_data.get("repository", {}).get(
+                        "nameWithOwner", "unknown"
+                    )
+                    contributions = repo_data.get("contributions", {}).get("nodes", [])
+                    logger.debug(
+                        "  Commit repo %d: %s (%d contributions)",
+                        i + 1,
+                        repo_name,
+                        len(contributions),
+                    )
+
+                    # Log first few contribution timestamps to understand GitHub's calendar logic
+                    for j, contrib in enumerate(
+                        contributions[:2]
+                    ):  # Limit to first 2 for brevity
+                        occurred_at = contrib.get("occurredAt")
+                        logger.debug(
+                            "    Contribution %d occurredAt: %s", j + 1, occurred_at
+                        )
+
         return data
 
     def _collect_issues(self, coll: dict[str, Any]) -> list[Change]:
@@ -476,6 +534,135 @@ class GithubClient:
                     )
 
                 next_url = self._next_link(resp.headers.get("Link"))
+
+        return results
+
+    def _fetch_detailed_commits_no_date_filter(
+        self,
+        repos: set[str],
+        start: datetime,
+        end: datetime,
+        viewer_login: str,
+    ) -> list[Change]:
+        """Fetch detailed commit information via REST API with relaxed date filtering.
+
+        This method uses a wider date range than the strict start/end bounds to avoid
+        timezone inconsistencies between GraphQL contributionsCollection and REST APIs,
+        but still applies an upper bound to prevent fetching too many irrelevant commits.
+        """
+        results: list[Change] = []
+        headers = {
+            "Authorization": f"Bearer {self.config.github_token}",
+            "Accept": "application/vnd.github+json",
+        }
+        start_utc = self._ensure_utc(start)
+        end_utc = self._ensure_utc(end)
+        # Extend the end time by 18 hours to account for timezone differences
+        # This catches commits that might be attributed to the wrong calendar day
+        # due to timezone mismatches between GraphQL contribution calendar and actual commit times
+        # 18 hours allows for commits made late in the day in any timezone
+        extended_end_utc = end_utc + timedelta(hours=18)
+        since = self.to_utc_iso(start_utc)
+
+        logger.debug(
+            "REST API commit date filtering: start=%s, original_end=%s, extended_end=%s",
+            start_utc,
+            end_utc,
+            extended_end_utc,
+        )
+
+        for full in repos:
+            owner, name = full.split("/", 1)
+            # Get commits for the specific author and time range
+            url = f"{self.config.api_url}/repos/{owner}/{name}/commits"
+            next_url = f"{url}?author={viewer_login}&since={since}"
+            logger.debug("Fetching detailed commits for repo %s: %s", full, next_url)
+
+            commits_fetched = 0
+            commits_accepted = 0
+            while next_url:
+                resp = requests.get(next_url, headers=headers, timeout=60)
+                if resp.status_code == 401:
+                    raise ValueError("Unauthorized: invalid GitHub token")
+                if resp.status_code == 404:
+                    # Repository might not exist or no access
+                    logger.debug("Repository %s not found or no access (404)", full)
+                    break
+
+                commits = resp.json() if isinstance(resp.json(), list) else []
+                commits_fetched += len(commits)
+
+                for commit in commits:
+                    commit_date_str = (
+                        commit.get("commit", {}).get("author", {}).get("date")
+                    )
+                    commit_date = self._parse_iso(commit_date_str)
+
+                    if not commit_date:
+                        logger.debug(
+                            "Commit skipped - no valid date: %s (repo: %s, sha: %s)",
+                            commit_date_str,
+                            full,
+                            commit.get("sha", "unknown")[:7],
+                        )
+                        continue
+
+                    # Apply upper bound filtering to prevent overlap between days
+                    # Allow commits up to 18 hours past the original end time to account for timezone issues
+                    if commit_date >= extended_end_utc:
+                        logger.debug(
+                            "Commit filtered out by extended upper bound: %s >= %s (repo: %s, sha: %s)",
+                            commit_date,
+                            extended_end_utc,
+                            full,
+                            commit.get("sha", "unknown")[:7],
+                        )
+                        continue
+
+                    commits_accepted += 1
+
+                    # Extract commit details
+                    commit_data = commit.get("commit", {})
+                    message = commit_data.get("message", "")
+                    message_headline = message.split("\n")[0] if message else ""
+                    sha = commit.get("sha", "")
+                    html_url = commit.get("html_url", "")
+
+                    # Use the first line of the commit message as the title
+                    if message_headline:
+                        title = message_headline
+                    elif sha:
+                        title = f"Commit {sha[:7]}"
+                    else:
+                        title = "Commit"
+
+                    # Store additional metadata
+                    metadata = {}
+                    if sha:
+                        metadata["sha"] = sha[:7]  # Short SHA
+                        metadata["full_sha"] = sha
+
+                    results.append(
+                        Change(
+                            id=html_url or f"commit-{full}-{sha}",
+                            type=ChangeType.COMMIT,
+                            timestamp=commit_date,
+                            repo_full_name=full,
+                            title=title,
+                            url=html_url,
+                            summary=message_headline if message_headline else None,
+                            metadata=metadata,
+                        )
+                    )
+
+                next_url = self._next_link(resp.headers.get("Link"))
+
+            logger.debug(
+                "Repo %s commit processing complete: fetched=%d, accepted=%d",
+                full,
+                commits_fetched,
+                commits_accepted,
+            )
 
         return results
 
