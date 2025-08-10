@@ -6,6 +6,7 @@ implemented in a later task along with GraphQL/REST mapping.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -14,6 +15,8 @@ import requests
 
 from summarizer.common.models import Change, ChangeType
 from summarizer.github.config import GithubConfig
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -69,19 +72,59 @@ class GithubClient:
         """Return changes between [start, end)."""
         if not self.config.github_token:
             return []
+        logger.info("GitHub window start=%s end=%s", start, end)
+        logger.info(
+            "GitHub include_types=%s org_filters=%s repo_filters=%s",
+            sorted(t.name for t in self.config.include_types),
+            self.config.org_filters,
+            self.config.repo_filters,
+        )
         data = self._fetch_contributions(start, end)
         user = data.get("data", {}).get("user", {})
         coll = user.get("contributionsCollection", {})
+        # Log quick summary of GraphQL collections returned
+        issues_count = len(coll.get("issueContributions", {}).get("nodes", []))
+        prs_count = len(coll.get("pullRequestContributions", {}).get("nodes", []))
+        reviews_count = len(
+            coll.get("pullRequestReviewContributions", {}).get("nodes", [])
+        )
+        commits_repo_count = len(coll.get("commitContributionsByRepository", []))
+        restricted = coll.get("restrictedContributionsCount")
+        logger.info(
+            "GraphQL collections: issues=%d prs=%d reviews=%d",
+            issues_count,
+            prs_count,
+            reviews_count,
+        )
+        logger.info(
+            "GraphQL collections: commitRepos=%d restricted=%s",
+            commits_repo_count,
+            restricted,
+        )
         changes: list[Change] = []
         changes.extend(self._collect_issues(coll))
         changes.extend(self._collect_pull_requests(coll))
         changes.extend(self._collect_reviews(coll))
         changes.extend(self._collect_commits(coll))
 
-        # REST fallbacks for comments (issue comments and PR review comments)
+        # REST fallbacks for comments and detailed commit info
         repos = self._discover_repos_from_contributions(coll)
         repos.update(self.config.repo_filters or [])
+        logger.info(
+            "GitHub repos to scan for comments and commits (count=%d): %s",
+            len(repos),
+            sorted(repos),
+        )
         viewer_login = self.config.user or self.get_viewer().login
+
+        # Fetch detailed commit information via REST API
+        if ChangeType.COMMIT in set(self.config.include_types):
+            # Replace basic commit data with detailed commit data
+            changes = [c for c in changes if c.type != ChangeType.COMMIT]
+            changes.extend(
+                self._fetch_detailed_commits(repos, start, end, viewer_login)
+            )
+
         if ChangeType.ISSUE_COMMENT in set(self.config.include_types):
             changes.extend(self._fetch_issue_comments(repos, start, end, viewer_login))
         if ChangeType.PR_COMMENT in set(self.config.include_types):
@@ -89,6 +132,13 @@ class GithubClient:
                 self._fetch_pr_review_comments(repos, start, end, viewer_login)
             )
         changes.sort(key=lambda ch: ch.timestamp)
+        # Summarize counts by type
+        counts: dict[str, int] = {}
+        for c in changes:
+            counts[c.type.value] = counts.get(c.type.value, 0) + 1
+        logger.info(
+            "GitHub changes collected: total=%d by_type=%s", len(changes), counts
+        )
         return changes
 
     def _fetch_contributions(self, start: datetime, end: datetime) -> dict[str, Any]:
@@ -99,16 +149,20 @@ class GithubClient:
         query = (
             "query($login:String!, $from:DateTime!, $to:DateTime!) {\n"
             "  user(login:$login) {\n"
-            "    contributionsCollection(from:$from, to:$to) {\n"
-            "      issueContributions(first: 100) { nodes {\n"
+            "    contributionsCollection(\n"
+            "      from:$from, to:$to\n"
+            "    ) {\n"
+            "      hasAnyRestrictedContributions\n"
+            "      restrictedContributionsCount\n"
+            "      issueContributions(first: 100) { totalCount nodes {\n"
             "        occurredAt\n"
             "        issue { title url createdAt repository { nameWithOwner } }\n"
             "      }}\n"
-            "      pullRequestContributions(first: 100) { nodes {\n"
+            "      pullRequestContributions(first: 100) { totalCount nodes {\n"
             "        occurredAt\n"
             "        pullRequest { title url createdAt repository { nameWithOwner } }\n"
             "      }}\n"
-            "      pullRequestReviewContributions(first: 100) { nodes {\n"
+            "      pullRequestReviewContributions(first: 100) { totalCount nodes {\n"
             "        occurredAt\n"
             "        pullRequest { title url createdAt repository { nameWithOwner } }\n"
             "      }}\n"
@@ -116,7 +170,6 @@ class GithubClient:
             "        repository { nameWithOwner }\n"
             "        contributions(first: 100) { nodes {\n"
             "          occurredAt\n"
-            "          commit { messageHeadline url oid }\n"
             "        }}\n"
             "      }\n"
             "    }\n"
@@ -129,6 +182,12 @@ class GithubClient:
             "from": self.to_utc_iso(start),
             "to": self.to_utc_iso(end),
         }
+        logger.info(
+            "GraphQL vars: login=%s from=%s to=%s",
+            variables["login"],
+            variables["from"],
+            variables["to"],
+        )
         resp = requests.post(
             self.config.graphql_url,
             json={"query": query, "variables": variables},
@@ -222,30 +281,8 @@ class GithubClient:
         return results
 
     def _collect_commits(self, coll: dict[str, Any]) -> list[Change]:
-        if ChangeType.COMMIT not in set(self.config.include_types):
-            return []
-        results: list[Change] = []
-        for repo_contrib in coll.get("commitContributionsByRepository", []):
-            repo = repo_contrib.get("repository", {}).get("nameWithOwner")
-            if not self._repo_allowed(repo):
-                continue
-            for cnode in repo_contrib.get("contributions", {}).get("nodes", []):
-                ts = self._parse_iso(cnode.get("occurredAt"))
-                commit = cnode.get("commit", {})
-                if ts is None or not commit:
-                    continue
-                results.append(
-                    Change(
-                        id=commit.get("oid", ""),
-                        type=ChangeType.COMMIT,
-                        timestamp=ts,
-                        repo_full_name=repo or "",
-                        title=commit.get("messageHeadline", ""),
-                        url=commit.get("url", ""),
-                        metadata={"sha": commit.get("oid", "")},
-                    )
-                )
-        return results
+        # This method now just returns empty since we fetch detailed commits via REST
+        return []
 
     def _discover_repos_from_contributions(self, coll: dict[str, Any]) -> set[str]:
         return set(self._iter_repo_names(coll))
@@ -270,6 +307,62 @@ class GithubClient:
             if repo:
                 repos.append(repo)
         return repos
+
+    def _fetch_comments(
+        self,
+        *,
+        repos: set[str],
+        start: datetime,
+        end: datetime,
+        viewer_login: str,
+        resource: str,
+        url_field: str,
+        change_type: ChangeType,
+        label: str,
+    ) -> list[Change]:
+        results: list[Change] = []
+        headers = {
+            "Authorization": f"Bearer {self.config.github_token}",
+            "Accept": "application/vnd.github+json",
+        }
+        start_utc = self._ensure_utc(start)
+        end_utc = self._ensure_utc(end)
+        since = self.to_utc_iso(start_utc)
+        for full in repos:
+            owner, name = full.split("/", 1)
+            url = f"{self.config.api_url}/repos/{owner}/{name}/{resource}"
+            next_url = f"{url}?since={since}"
+            while next_url:
+                resp = requests.get(next_url, headers=headers, timeout=60)
+                if resp.status_code == 401:
+                    raise ValueError("Unauthorized: invalid GitHub token")
+                items = resp.json() if isinstance(resp.json(), list) else []
+                for it in items:
+                    created = self._parse_iso(it.get("created_at"))
+                    if not created or not (start_utc <= created < end_utc):
+                        continue
+                    user = (it.get("user") or {}).get("login")
+                    if user != viewer_login:
+                        continue
+                    ref_url = it.get(url_field, "")
+                    num = self._extract_number(ref_url)
+                    title = (
+                        f"Commented on {label} #{num}"
+                        if num
+                        else f"Commented on {label}"
+                    )
+                    results.append(
+                        Change(
+                            id=str(it.get("id", "")),
+                            type=change_type,
+                            timestamp=created,
+                            repo_full_name=full,
+                            title=title,
+                            url=it.get("html_url", ""),
+                        )
+                    )
+                next_url = self._next_link(resp.headers.get("Link"))
+        return results
 
     def _fetch_issue_comments(
         self,
@@ -306,6 +399,85 @@ class GithubClient:
             change_type=ChangeType.PR_COMMENT,
             label="PR",
         )
+
+    def _fetch_detailed_commits(
+        self,
+        repos: set[str],
+        start: datetime,
+        end: datetime,
+        viewer_login: str,
+    ) -> list[Change]:
+        """Fetch detailed commit information via REST API."""
+        results: list[Change] = []
+        headers = {
+            "Authorization": f"Bearer {self.config.github_token}",
+            "Accept": "application/vnd.github+json",
+        }
+        start_utc = self._ensure_utc(start)
+        end_utc = self._ensure_utc(end)
+        since = self.to_utc_iso(start_utc)
+
+        for full in repos:
+            owner, name = full.split("/", 1)
+            # Get commits for the specific author and time range
+            url = f"{self.config.api_url}/repos/{owner}/{name}/commits"
+            next_url = f"{url}?author={viewer_login}&since={since}"
+
+            while next_url:
+                resp = requests.get(next_url, headers=headers, timeout=60)
+                if resp.status_code == 401:
+                    raise ValueError("Unauthorized: invalid GitHub token")
+                if resp.status_code == 404:
+                    # Repository might not exist or no access
+                    break
+
+                commits = resp.json() if isinstance(resp.json(), list) else []
+                for commit in commits:
+                    commit_date_str = (
+                        commit.get("commit", {}).get("author", {}).get("date")
+                    )
+                    commit_date = self._parse_iso(commit_date_str)
+
+                    if not commit_date or not (start_utc <= commit_date < end_utc):
+                        continue
+
+                    # Extract commit details
+                    commit_data = commit.get("commit", {})
+                    message = commit_data.get("message", "")
+                    message_headline = message.split("\n")[0] if message else ""
+                    sha = commit.get("sha", "")
+                    html_url = commit.get("html_url", "")
+
+                    # Use the first line of the commit message as the title
+                    if message_headline:
+                        title = message_headline
+                    elif sha:
+                        title = f"Commit {sha[:7]}"
+                    else:
+                        title = "Commit"
+
+                    # Store additional metadata
+                    metadata = {}
+                    if sha:
+                        metadata["sha"] = sha[:7]  # Short SHA
+                        metadata["full_sha"] = sha
+
+                    results.append(
+                        Change(
+                            id=html_url or f"commit-{full}-{sha}",
+                            type=ChangeType.COMMIT,
+                            timestamp=commit_date,
+                            repo_full_name=full,
+                            title=title,
+                            url=html_url,
+                            summary=message_headline if message_headline else None,
+                            metadata=metadata,
+                        )
+                    )
+
+                next_url = self._next_link(resp.headers.get("Link"))
+
+        return results
 
     @staticmethod
     def _next_link(link_header: str | None) -> str | None:
