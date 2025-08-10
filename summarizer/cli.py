@@ -353,6 +353,13 @@ def main(
     safe_rate: Annotated[
         bool, typer.Option(help="Back off when GitHub rate is low")
     ] = False,
+    # Platform control flags
+    no_webex: Annotated[
+        bool, typer.Option("--no-webex", help="Disable Webex processing")
+    ] = False,
+    no_github: Annotated[
+        bool, typer.Option("--no-github", help="Disable GitHub processing")
+    ] = False,
 ) -> None:
     """Summarizer CLI (unified Webex + GitHub)."""
     if debug is True:
@@ -363,12 +370,13 @@ def main(
         _validate_and_parse_dates(target_date, start_date, end_date)
     )
 
-    webex_active = bool(webex_token and user_email)
-    github_active = bool(github_token)
+    webex_active = bool(webex_token and user_email) and not no_webex
+    github_active = bool(github_token) and not no_github
     if not webex_active and not github_active:
         typer.echo(
-            "[red]No platform credentials provided. Provide Webex and/or GitHub "
-            "credentials.[/red]"
+            "[red]No platforms are active. Either provide Webex and/or GitHub "
+            "credentials, or remove --no-webex/--no-github flags if credentials "
+            "are provided.[/red]"
         )
         raise typer.Exit(1)
 
