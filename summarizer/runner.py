@@ -17,10 +17,23 @@ from summarizer.webex import WebexClient
 logger = logging.getLogger(__name__)
 
 
-def run_app(config: AppConfig, date_header: bool = False) -> None:
+def run_app(
+    config: AppConfig, 
+    date_header: bool = False,
+    room_search_mode: str | None = None,
+    room_search_value: str | None = None,
+    apply_date_filter: bool = True,
+) -> None:
     """Run the application with the given configuration.
 
-    Optionally print a date header.
+    Optionally print a date header. Can operate in room-specific mode.
+    
+    Args:
+        config: Application configuration
+        date_header: Whether to print a date header
+        room_search_mode: Type of room search ('room_id', 'room_name', 'person_name')
+        room_search_value: Value to search for
+        apply_date_filter: Whether to filter messages by date (False for room-only searches)
     """
     local_tz = datetime.now().astimezone().tzinfo
     if local_tz is None:
@@ -65,11 +78,59 @@ def run_app(config: AppConfig, date_header: bool = False) -> None:
         console.log(f"Connected as [bold green]{me.display_name}[/]")
         logger.info("Successfully connected to Webex API as %s", me.display_name)
 
-    console.print(f"Looking for activity on [bold]{config.target_date.date()}[/]...")
+    # Handle room-specific or date-based workflow
+    if room_search_mode and room_search_value:
+        # Room-specific workflow
+        room = None
+        if room_search_mode == "room_id":
+            console.print(f"Looking for room with ID [bold]{room_search_value}[/]...")
+            room = webex_client.find_room_by_id(room_search_value)
+        elif room_search_mode == "room_name":
+            console.print(f"Looking for room named [bold]{room_search_value}[/]...")
+            room = webex_client.find_room_by_name(room_search_value)
+        elif room_search_mode == "person_name":
+            console.print(f"Looking for DM with [bold]{room_search_value}[/]...")
+            room = webex_client.find_dm_room_by_person_name(room_search_value)
 
-    message_data = webex_client.get_activity(
-        config.target_date, local_tz, config.room_chunk_size
-    )
+        if room is None:
+            console.print(f"[red]Could not find room/person: {room_search_value}[/]")
+            if room_search_mode == "room_id":
+                console.print("[yellow]Please verify the room ID is correct and you have access to it.[/]")
+            elif room_search_mode == "room_name":
+                console.print("[yellow]Please verify the room name is exactly correct (case-sensitive).[/]")
+            elif room_search_mode == "person_name":
+                console.print("[yellow]Please verify the person's name is exactly correct and you have a DM with them.[/]")
+            return
+
+        console.print(f"Found room: [bold green]{room.title}[/] (ID: {room.id})")
+        
+        # Get all messages from the room
+        message_data = webex_client.get_all_messages_from_room(
+            room, config.max_messages, local_tz
+        )
+        
+        # Apply date filtering if specified
+        # Note: For room-specific searches with date ranges, we still filter here
+        # since we retrieved all messages from the room first
+        # This is different from the traditional workflow which pre-filters by date
+        if apply_date_filter and config.target_date:
+            original_count = len(message_data)
+            message_data = [
+                msg for msg in message_data 
+                if msg.timestamp.date() == config.target_date.date()
+            ]
+            console.print(
+                f"Filtered to [bold]{len(message_data)}[/] messages from "
+                f"[bold]{config.target_date.date()}[/] (out of {original_count} total)"
+            )
+    else:
+        # Traditional date-based workflow
+        if config.target_date is None:
+            raise ValueError("Target date is required for traditional date-based workflow")
+        console.print(f"Looking for activity on [bold]{config.target_date.date()}[/]...")
+        message_data = webex_client.get_activity(
+            config.target_date, local_tz, config.room_chunk_size
+        )
 
     # Conversation grouping integration
     context_window = timedelta(minutes=config.context_window_minutes)

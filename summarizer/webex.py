@@ -228,6 +228,126 @@ class WebexClient:
         messages.sort(key=lambda x: x.timestamp)
         return messages
 
+    def find_room_by_id(self, room_id: str) -> Room | None:
+        """Find a room by exact room ID match.
+        
+        Args:
+            room_id: The exact room ID to find
+            
+        Returns:
+            Room object if found, None otherwise
+        """
+        try:
+            return self._client.rooms.get(roomId=room_id)
+        except ApiError as e:
+            if "404" in str(e):
+                logger.info("Room with ID %s not found", room_id)
+                return None
+            else:
+                raise
+
+    def find_room_by_name(self, room_name: str) -> Room | None:
+        """Find a room by exact room name match.
+        
+        Args:
+            room_name: The exact room name to find
+            
+        Returns:
+            Room object if found, None otherwise
+        """
+        rooms = self._client.rooms.list(max=1000)  # Get more rooms for searching
+        for room in rooms:
+            if room.title == room_name:
+                logger.info("Found room '%s' with ID %s", room_name, room.id)
+                return room
+        logger.info("No room found with exact name '%s'", room_name)
+        return None
+
+    def find_dm_room_by_person_name(self, person_name: str) -> Room | None:
+        """Find a direct message room with a specific person by exact name match.
+        
+        Args:
+            person_name: The exact display name of the person to find DM with
+            
+        Returns:
+            Room object if found, None otherwise
+        """
+        # Get all rooms and filter for direct message rooms
+        all_rooms = self._client.rooms.list(max=1000)
+        dm_rooms = [room for room in all_rooms if room.type == "direct"]
+        
+        for room in dm_rooms:
+            try:
+                # Get memberships to find the other person in the DM
+                memberships = self._client.memberships.list(roomId=room.id)
+                me = self.get_me()
+                
+                for membership in memberships:
+                    if membership.personId != me.id:
+                        # This is the other person in the DM
+                        other_person = safe_get_person(self._client, membership.personId)
+                        if other_person.display_name == person_name:
+                            logger.info(
+                                "Found DM room with %s (ID: %s, Room ID: %s)",
+                                person_name, membership.personId, room.id
+                            )
+                            return room
+            except ApiError as e:
+                logger.warning("Error checking memberships for room %s: %s", room.id, e)
+                continue
+                
+        logger.info("No DM room found with person named '%s'", person_name)
+        return None
+
+    def get_all_messages_from_room(
+        self, room: Room, max_messages: int = 1000, local_tz: tzinfo | None = None
+    ) -> list[Message]:
+        """Get all messages from a specific room up to max_messages limit.
+        
+        Args:
+            room: The room to retrieve messages from
+            max_messages: Maximum number of messages to retrieve
+            local_tz: Local timezone for timestamp conversion
+            
+        Returns:
+            List of Message objects sorted chronologically
+        """
+        if local_tz is None:
+            local_tz = UTC
+            
+        messages: list[Message] = []
+        sdk_messages = self._client.messages.list(roomId=room.id, max=max_messages)
+        
+        logger.info("Retrieving up to %d messages from room '%s'", max_messages, room.title)
+        
+        with Progress(
+            SpinnerColumn(),
+            TextColumn(f"[bold blue]Fetching messages from {room.title}..."),
+            TextColumn("[green]Retrieved: {task.completed}"),
+            BarColumn(),
+            console=console,
+        ) as progress:
+            task = progress.add_task("Fetching messages...", total=None)
+            
+            for sdk_message in sdk_messages:
+                if len(messages) >= max_messages:
+                    break
+                    
+                if sdk_message.created is None:
+                    logger.warning(
+                        "Message %s has no creation date, skipping...", sdk_message.id
+                    )
+                    continue
+                    
+                msg = create_message(sdk_message, self._client, room, local_tz)
+                messages.append(msg)
+                progress.update(task, advance=1)
+                
+        logger.info("Retrieved %d messages from room '%s'", len(messages), room.title)
+        # Sort chronologically (oldest first)
+        messages.sort(key=lambda x: x.timestamp)
+        return messages
+
     def get_activity(
         self, date: datetime, local_tz: tzinfo, room_chunk_size: int = 50
     ) -> list[Message]:
