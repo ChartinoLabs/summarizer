@@ -67,6 +67,39 @@ def _handle_single_date(target_date: str | None) -> datetime:
         raise typer.Exit(1) from exc
 
 
+def _validate_room_parameters(
+    room_id: str | None,
+    room_name: str | None,
+    person_name: str | None,
+) -> str | None:
+    """Validate room-specific parameters and return the search mode.
+    
+    Returns:
+        Search mode: 'room_id', 'room_name', 'person_name', or None if no room params.
+        
+    Raises:
+        typer.Exit on validation error.
+    """
+    room_params = [room_id, room_name, person_name]
+    active_params = [p for p in room_params if p is not None]
+    
+    if len(active_params) > 1:
+        typer.echo(
+            "[red]Cannot use multiple room identification options simultaneously. "
+            "Please choose only one of --room-id, --room-name, or --person-name.[/red]"
+        )
+        raise typer.Exit(1)
+    
+    if room_id:
+        return "room_id"
+    elif room_name:
+        return "room_name"
+    elif person_name:
+        return "person_name"
+    else:
+        return None
+
+
 def _validate_and_parse_dates(
     target_date: str | None,
     start_date: str | None,
@@ -107,14 +140,21 @@ def _validate_and_parse_dates(
 def _run_for_date(
     config: AppConfig,
     date_header: bool,
+    room_search_mode: str | None = None,
+    room_search_value: str | None = None,
+    apply_date_filter: bool = True,
 ) -> None:
     logger.info("Attempting to log into Webex API as user %s", config.user_email)
-    logger.info("Targeted date for summarization: %s", config.target_date)
+    if room_search_mode:
+        logger.info("Room search mode: %s with value: %s", room_search_mode, room_search_value)
+        logger.info("Max messages to retrieve: %d", config.max_messages)
+    else:
+        logger.info("Targeted date for summarization: %s", config.target_date)
     logger.info("Context window size: %d minutes", config.context_window_minutes)
     logger.info("Passive participation: %s", config.passive_participation)
     logger.info("Time display format: %s", config.time_display_format)
     logger.info("Room fetch chunk size: %d", config.room_chunk_size)
-    run_app(config, date_header=date_header)
+    run_app(config, date_header=date_header, room_search_mode=room_search_mode, room_search_value=room_search_value, apply_date_filter=apply_date_filter)
 
 
 @app.command()
@@ -177,17 +217,68 @@ def main(
         TimeDisplayFormat, typer.Option(help="Time display format ('12h' or '24h')")
     ] = TimeDisplayFormat.h12,
     room_chunk_size: Annotated[int, typer.Option(help="Room fetch chunk size")] = 50,
+    room_id: Annotated[
+        str | None,
+        typer.Option(
+            help="Specific room ID to retrieve all messages from (exact match)"
+        ),
+    ] = None,
+    room_name: Annotated[
+        str | None,
+        typer.Option(
+            help="Specific room name to retrieve all messages from (exact match)"
+        ),
+    ] = None,
+    person_name: Annotated[
+        str | None,
+        typer.Option(
+            help="Person name to find DM room with (exact match)"
+        ),
+    ] = None,
+    max_messages: Annotated[
+        int, typer.Option(help="Maximum number of messages to retrieve from room")
+    ] = 1000,
 ) -> None:
     """Webex Summarizer CLI (Typer config parsing demo)."""
     if debug is True:
         logger.setLevel(logging.DEBUG)
         logger.debug("Debug logging enabled")
 
-    parsed_target_date, parsed_start_date, parsed_end_date, mode = (
-        _validate_and_parse_dates(target_date, start_date, end_date)
-    )
+    # Validate room parameters
+    room_search_mode = _validate_room_parameters(room_id, room_name, person_name)
+    
+    # Handle date parameters based on whether room search is specified
+    if room_search_mode:
+        # Room-based search - dates are optional for filtering
+        if target_date or start_date or end_date:
+            parsed_target_date, parsed_start_date, parsed_end_date, date_mode = (
+                _validate_and_parse_dates(target_date, start_date, end_date)
+            )
+        else:
+            # No date filtering - retrieve all messages from room
+            parsed_target_date, parsed_start_date, parsed_end_date, date_mode = None, None, None, None
+    else:
+        # Traditional date-based search - validate dates
+        parsed_target_date, parsed_start_date, parsed_end_date, date_mode = (
+            _validate_and_parse_dates(target_date, start_date, end_date)
+        )
+        
+        # If no explicit date provided, prompt for one
+        if date_mode == "single" and target_date is None:
+            parsed_target_date = _handle_single_date(None)
+            date_mode = "single"
+        elif parsed_target_date is None and parsed_start_date is None:
+            typer.echo(
+                "[red]Please specify either date-based options (--target-date, "
+                "--start-date/--end-date) or room-based options (--room-id, "
+                "--room-name, --person-name).[/red]"
+            )
+            raise typer.Exit(1)
 
-    if mode == "range":
+    # Get room search value for room-based searches
+    room_search_value = room_id or room_name or person_name
+    
+    if date_mode == "range":
         # Iterate over date range (inclusive)
         current = parsed_start_date
         if current is None or parsed_end_date is None:
@@ -203,15 +294,18 @@ def main(
                 passive_participation=passive_participation,
                 time_display_format=time_display_format.value,
                 room_chunk_size=room_chunk_size,
+                max_messages=max_messages,
             )
-            _run_for_date(config, date_header=True)
+            _run_for_date(config, date_header=True, room_search_mode=room_search_mode, room_search_value=room_search_value, apply_date_filter=True)
             current += timedelta(days=1)
         return
 
-    # Single date mode
-    if parsed_target_date is None:
+    # Single date mode or room-only mode
+    if parsed_target_date is None and not room_search_mode:
+        # Traditional date-based mode requires a date
         raise ValueError("Target date must be provided for single date mode")
-    # Construct AppConfig for a single date
+    
+    # Construct AppConfig
     config = AppConfig(
         webex_token=webex_token,
         user_email=user_email,
@@ -220,8 +314,13 @@ def main(
         passive_participation=passive_participation,
         time_display_format=time_display_format.value,
         room_chunk_size=room_chunk_size,
+        max_messages=max_messages,
     )
-    _run_for_date(config, date_header=False)
+    # Determine if we should apply date filtering
+    # Only skip date filtering for room-only searches (room specified but no date params)
+    should_apply_date_filter = not (room_search_mode and parsed_target_date is None)
+    
+    _run_for_date(config, date_header=False, room_search_mode=room_search_mode, room_search_value=room_search_value, apply_date_filter=should_apply_date_filter)
 
 
 if __name__ == "__main__":

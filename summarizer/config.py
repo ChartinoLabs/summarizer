@@ -13,11 +13,12 @@ class AppConfig:
 
     webex_token: str
     user_email: str
-    target_date: datetime
+    target_date: datetime | None
     context_window_minutes: int = 15
     passive_participation: bool = False
     time_display_format: Literal["12h", "24h"] = "12h"
     room_chunk_size: int = 50
+    max_messages: int = 1000
 
 
 def load_config_from_env() -> None:

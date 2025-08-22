@@ -73,8 +73,8 @@ def display_conversations(
 
     for convo in sorted_conversations:
         # Header with stats
-        start_fmt = _format_time(convo.start_time, time_display_format)
-        end_fmt = _format_time(convo.end_time, time_display_format)
+        start_fmt = _format_datetime(convo.start_time, time_display_format)
+        end_fmt = _format_datetime(convo.end_time, time_display_format)
         participants = ", ".join([u.display_name for u in convo.participants])
         duration = (
             humanize.precisedelta(
@@ -95,12 +95,12 @@ def display_conversations(
 
         # Table of messages
         table = Table(show_header=True)
-        table.add_column("Time", style="cyan")
+        table.add_column("Date & Time", style="cyan")
         table.add_column("Sender", style="green")
         table.add_column("Message", style="white", no_wrap=False, overflow="fold")
         for msg in convo.messages:
             table.add_row(
-                _format_time(msg.timestamp, time_display_format),
+                _format_datetime(msg.timestamp, time_display_format),
                 msg.sender.display_name,
                 msg.content,
             )
@@ -129,17 +129,17 @@ def display_conversations_summary(
     table = Table(show_header=True, title="Conversation Overview")
     table.add_column("Conversation ID", style="bold blue", no_wrap=True)
     table.add_column("Participants", style="green", no_wrap=False)
-    table.add_column("Start Time", style="cyan", no_wrap=True)
-    table.add_column("End Time", style="cyan", no_wrap=True)
+    table.add_column("Start Date & Time", style="cyan", no_wrap=True)
+    table.add_column("End Date & Time", style="cyan", no_wrap=True)
     table.add_column("Duration", style="yellow", no_wrap=True)
 
     for convo in sorted_conversations:
         # Format participants as comma-separated list
         participants = ", ".join([u.display_name for u in convo.participants])
 
-        # Format times
-        start_time = _format_time(convo.start_time, time_display_format)
-        end_time = _format_time(convo.end_time, time_display_format)
+        # Format times with dates
+        start_time = _format_datetime(convo.start_time, time_display_format)
+        end_time = _format_datetime(convo.end_time, time_display_format)
 
         # Format duration using humanize with precision
         if convo.duration_seconds is not None:
@@ -187,6 +187,16 @@ def _format_time(dt: datetime | None, fmt: str) -> str:
         return dt.strftime("%H:%M:%S")
     else:
         return dt.strftime("%I:%M:%S %p")
+
+
+def _format_datetime(dt: datetime | None, fmt: str) -> str:
+    """Format datetime with both date and time information."""
+    if not dt:
+        return "-"
+    if fmt == "24h":
+        return dt.strftime("%Y-%m-%d %H:%M:%S")
+    else:
+        return dt.strftime("%Y-%m-%d %I:%M:%S %p")
 
 
 # For the range of dates, print a header with each date
