@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 import requests
@@ -73,12 +73,12 @@ class RESTClient:
                         continue
                     
                     created_at = parse_iso(comment.get("created_at"))
-                    if not created_at or created_at >= end:
+                    if not created_at or created_at < start.replace(tzinfo=UTC) or created_at >= end.replace(tzinfo=UTC):
                         continue
                     
                     issue_url = comment.get("issue_url", "")
                     number = extract_number(issue_url)
-                    title = f"Commented on #{number}" if number else "Issue comment"
+                    title = f"Commented on issue #{number}" if number else "Issue comment"
                     
                     results.append(Change(
                         id=comment.get("html_url", ""),
@@ -131,7 +131,7 @@ class RESTClient:
                         continue
                     
                     created_at = parse_iso(comment.get("created_at"))
-                    if not created_at or created_at >= end:
+                    if not created_at or created_at < start.replace(tzinfo=UTC) or created_at >= end.replace(tzinfo=UTC):
                         continue
                     
                     pr_url = comment.get("pull_request_url", "")

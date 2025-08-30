@@ -54,6 +54,8 @@ class GithubClient:
             headers=headers, 
             timeout=60
         )
+        if resp.status_code == 401:
+            raise ValueError("Unauthorized: Invalid GitHub token")
         resp.raise_for_status()
         data = resp.json()
         

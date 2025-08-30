@@ -32,9 +32,14 @@ class GraphQLClient:
         from_date = start.strftime("%Y-%m-%dT%H:%M:%SZ")
         to_date = end.strftime("%Y-%m-%dT%H:%M:%SZ")
 
+        if user == "viewer":
+            user_query_fragment = "viewer"
+        else:
+            user_query_fragment = f'user(login: "{user}")'
+            
         query = f"""
         query {{
-            {user} {{
+            {user_query_fragment} {{
                 contributionsCollection(from: "{from_date}", to: "{to_date}") {{
                     totalCommitContributions
                     totalIssueContributions
@@ -104,7 +109,7 @@ class GraphQLClient:
         if "errors" in data:
             raise ValueError(f"GraphQL errors: {data['errors']}")
         
-        user_key = "viewer" if user == "viewer" else user
+        user_key = "viewer" if user == "viewer" else "user"
         return data["data"][user_key]["contributionsCollection"]
 
     def collect_issues(self, coll: dict[str, Any]) -> list[Change]:
