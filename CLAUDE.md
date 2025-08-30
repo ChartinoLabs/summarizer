@@ -18,19 +18,62 @@ uv sync --all-extras
 ```
 
 ### Running the Application
+
+#### Webex Authentication (Choose One)
+
+**Option 1: OAuth 2.0 (Recommended)**
+```bash
+# Set up OAuth credentials
+export USER_EMAIL=you@example.com
+export WEBEX_OAUTH_CLIENT_ID=your_client_id
+export WEBEX_OAUTH_CLIENT_SECRET=your_client_secret
+
+# Authenticate once (opens browser)
+uv run summarizer webex login
+
+# Check authentication status
+uv run summarizer webex status
+
+# Run summarizer (uses stored OAuth tokens)
+uv run summarizer --target-date=2024-06-01
+```
+
+**Option 2: Manual Token (Legacy)**
+```bash
+# Using manual token (expires in 12 hours)
+export USER_EMAIL=you@example.com
+export WEBEX_TOKEN=your_manual_token
+uv run summarizer --target-date=2024-06-01
+```
+
+#### GitHub Authentication
+```bash
+export GITHUB_TOKEN=your_github_token
+```
+
+#### Basic Usage
 ```bash
 # Show help
 uv run summarizer --help
 
-# Basic usage with environment variables
-export USER_EMAIL=you@example.com
-export WEBEX_TOKEN=your_token
-export GITHUB_TOKEN=your_github_token
+# Run with both platforms
 uv run summarizer --target-date=2024-06-01
 
 # Run with specific platforms disabled
 uv run summarizer --no-github --target-date=2024-06-01
 uv run summarizer --no-webex --target-date=2024-06-01
+```
+
+#### OAuth Management Commands
+```bash
+# Authenticate with Webex OAuth
+uv run summarizer webex login
+
+# Check authentication status and refresh tokens
+uv run summarizer webex status
+
+# Logout (remove stored credentials)
+uv run summarizer webex logout
 ```
 
 ### Testing
@@ -70,8 +113,16 @@ uv run pre-commit run --all-files
 
 #### Configuration System
 - `BaseConfig`: Abstract base for platform-agnostic configuration
-- `WebexConfig`: Webex-specific settings (tokens, email, context windows)  
+- `WebexConfig`: Webex-specific settings (OAuth/manual tokens, email, context windows)  
 - `GithubConfig`: GitHub-specific settings (tokens, API URLs, org/repo filters)
+
+#### Authentication System
+- **Webex OAuth 2.0**: PKCE-secured authorization flow with automatic token refresh
+  - Access tokens: 14-day expiration
+  - Refresh tokens: 90-day expiration
+  - Secure credential storage in `~/.config/summarizer/`
+- **Webex Manual Token**: Legacy 12-hour token support (fallback)
+- **GitHub**: Personal access token authentication
 
 #### Data Models
 - **Webex**: `User`, `Message`, `Conversation`, `Thread` models for chat data

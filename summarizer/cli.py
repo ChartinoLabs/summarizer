@@ -13,6 +13,7 @@ from summarizer.common.models import ChangeType
 from summarizer.github.config import GithubConfig
 from summarizer.github.runner import GithubRunner
 from summarizer.webex.config import WebexConfig
+from summarizer.webex.oauth import WebexOAuthApp, WebexOAuthClient
 from summarizer.webex.runner import WebexRunner
 
 # Load environment variables from .env before initializing the Typer app
@@ -23,6 +24,10 @@ setup_logging()
 logger = logging.getLogger(__name__)
 
 app = typer.Typer(pretty_exceptions_enable=False)
+
+# Create subcommand for OAuth management
+webex_app = typer.Typer(help="Webex OAuth authentication management")
+app.add_typer(webex_app, name="webex")
 
 
 class TimeDisplayFormat(str, Enum):
@@ -162,6 +167,7 @@ def _parse_change_types(values: list[str] | None) -> set[ChangeType]:
         except (KeyError, ValueError) as e:
             # Log unknown change type values for debugging
             import logging
+
             logging.debug(f"Unknown change type '{key}': {e}")
             continue
     return result or set(ChangeType)
@@ -178,6 +184,8 @@ def _build_webex_args(
     *,
     webex_token: str | None,
     user_email: str | None,
+    webex_oauth_client_id: str | None,
+    webex_oauth_client_secret: str | None,
     context_window_minutes: int,
     passive_participation: bool,
     time_display_format: TimeDisplayFormat,
@@ -187,6 +195,8 @@ def _build_webex_args(
     return dict(
         webex_token=webex_token,
         user_email=user_email,
+        oauth_client_id=webex_oauth_client_id,
+        oauth_client_secret=webex_oauth_client_secret,
         context_window_minutes=context_window_minutes,
         passive_participation=passive_participation,
         time_display_format=time_display_format,
@@ -230,15 +240,19 @@ def _build_webex_config(
     date: datetime,
     webex_token: str | None,
     user_email: str | None,
+    oauth_client_id: str | None,
+    oauth_client_secret: str | None,
     context_window_minutes: int,
     passive_participation: bool,
     time_display_format: TimeDisplayFormat,
     room_chunk_size: int,
 ) -> WebexConfig:
     return WebexConfig(
-        webex_token=webex_token or "",
         user_email=user_email or "",
         target_date=date,
+        webex_token=webex_token,
+        oauth_client_id=oauth_client_id,
+        oauth_client_secret=oauth_client_secret,
         context_window_minutes=context_window_minutes,
         passive_participation=passive_participation,
         time_display_format=time_display_format.value,
@@ -275,7 +289,7 @@ def _setup_debug_logging(debug: bool) -> None:
     """Configure debug logging when requested."""
     if not debug:
         return
-        
+
     # Set debug level for all relevant loggers
     logging.getLogger().setLevel(logging.DEBUG)
     logging.getLogger("summarizer.github.client").setLevel(logging.DEBUG)
@@ -295,22 +309,48 @@ def _setup_debug_logging(debug: bool) -> None:
 def _determine_active_platforms(
     webex_token: str | None,
     user_email: str | None,
+    webex_oauth_client_id: str | None,
+    webex_oauth_client_secret: str | None,
     github_token: str | None,
     no_webex: bool,
     no_github: bool,
 ) -> tuple[bool, bool]:
     """Determine which platforms are active based on credentials and flags."""
-    webex_active = bool(webex_token and user_email) and not no_webex
+    # Webex is active if user_email is provided AND either:
+    # 1. Manual token is provided, OR
+    # 2. OAuth credentials are provided, OR
+    # 3. OAuth credentials are stored from previous authentication
+    webex_has_auth = False
+    if user_email:
+        if webex_token:
+            webex_has_auth = True
+        elif webex_oauth_client_id and webex_oauth_client_secret:
+            # Check if we have valid OAuth config or stored credentials
+            try:
+                from summarizer.webex.oauth import WebexOAuthApp, WebexOAuthClient
+
+                app_config = WebexOAuthApp(
+                    client_id=webex_oauth_client_id,
+                    client_secret=webex_oauth_client_secret,
+                )
+                oauth_client = WebexOAuthClient(app_config)
+                # Check if we can get a valid token (either stored or can be refreshed)
+                webex_has_auth = bool(oauth_client.get_valid_access_token())
+            except Exception:
+                webex_has_auth = False
+
+    webex_active = webex_has_auth and not no_webex
     github_active = bool(github_token) and not no_github
-    
+
     if not webex_active and not github_active:
         typer.echo(
-            "[red]No platforms are active. Either provide Webex and/or GitHub "
-            "credentials, or remove --no-webex/--no-github flags if credentials "
-            "are provided.[/red]"
+            "[red]No platforms are active. For Webex, provide either:\n"
+            "  1. --webex-token and --user-email, OR\n"
+            "  2. --webex-oauth-client-id, --webex-oauth-client-secret, --user-email, and run 'summarizer webex login'\n"
+            "For GitHub, provide --github-token.[/red]"
         )
         raise typer.Exit(1)
-    
+
     return webex_active, github_active
 
 
@@ -324,10 +364,8 @@ def _execute_range_mode(
 ) -> None:
     """Execute processing for a date range."""
     if parsed_start_date is None or parsed_end_date is None:
-        raise ValueError(
-            "Both start_date and end_date must be provided for range mode"
-        )
-    
+        raise ValueError("Both start_date and end_date must be provided for range mode")
+
     current = parsed_start_date
     while current <= parsed_end_date:
         _execute_for_date(
@@ -350,7 +388,7 @@ def _execute_single_date_mode(
     """Execute processing for a single date."""
     if parsed_target_date is None:
         raise ValueError("Target date must be provided for single date mode")
-    
+
     _execute_for_date(
         date=parsed_target_date,
         webex_active=webex_active,
@@ -379,8 +417,144 @@ def _execute_for_date(
         _run_github_for_date(gcfg, date_header=False)
 
 
-@app.command()
+@webex_app.command("login")
+def webex_oauth_login(
+    client_id: Annotated[
+        str | None,
+        typer.Option(
+            envvar="WEBEX_OAUTH_CLIENT_ID", help="Webex OAuth application client ID"
+        ),
+    ] = None,
+    client_secret: Annotated[
+        str | None,
+        typer.Option(
+            envvar="WEBEX_OAUTH_CLIENT_SECRET",
+            help="Webex OAuth application client secret",
+            hide_input=True,
+        ),
+    ] = None,
+    redirect_uri: Annotated[
+        str, typer.Option(help="OAuth redirect URI")
+    ] = "http://localhost:8080/callback",
+) -> None:
+    """Authenticate with Webex using OAuth 2.0 flow."""
+    if not client_id:
+        client_id = typer.prompt("Webex OAuth Client ID")
+    if not client_secret:
+        client_secret = typer.prompt("Webex OAuth Client Secret", hide_input=True)
+
+    try:
+        app_config = WebexOAuthApp(
+            client_id=client_id, client_secret=client_secret, redirect_uri=redirect_uri
+        )
+        oauth_client = WebexOAuthClient(app_config)
+
+        # Start interactive authentication
+        credentials = oauth_client.start_interactive_auth()
+
+        typer.echo(f"✅ Successfully authenticated with Webex!")
+        typer.echo(f"Access token expires: {credentials.expires_at}")
+        typer.echo(f"Credentials saved to: {oauth_client.credentials_file}")
+
+    except Exception as e:
+        typer.echo(f"❌ Authentication failed: {e}", err=True)
+        raise typer.Exit(1)
+
+
+@webex_app.command("logout")
+def webex_oauth_logout(
+    client_id: Annotated[
+        str | None,
+        typer.Option(
+            envvar="WEBEX_OAUTH_CLIENT_ID", help="Webex OAuth application client ID"
+        ),
+    ] = None,
+    client_secret: Annotated[
+        str | None,
+        typer.Option(
+            envvar="WEBEX_OAUTH_CLIENT_SECRET",
+            help="Webex OAuth application client secret",
+            hide_input=True,
+        ),
+    ] = None,
+) -> None:
+    """Remove stored Webex OAuth credentials."""
+    if not client_id:
+        client_id = typer.prompt("Webex OAuth Client ID")
+    if not client_secret:
+        client_secret = typer.prompt("Webex OAuth Client Secret", hide_input=True)
+
+    try:
+        app_config = WebexOAuthApp(client_id=client_id, client_secret=client_secret)
+        oauth_client = WebexOAuthClient(app_config)
+
+        if oauth_client.credentials_file.exists():
+            oauth_client.revoke_credentials()
+            typer.echo("✅ Successfully logged out of Webex")
+        else:
+            typer.echo("ℹ️  No stored credentials found")
+
+    except Exception as e:
+        typer.echo(f"❌ Logout failed: {e}", err=True)
+        raise typer.Exit(1)
+
+
+@webex_app.command("status")
+def webex_oauth_status(
+    client_id: Annotated[
+        str | None,
+        typer.Option(
+            envvar="WEBEX_OAUTH_CLIENT_ID", help="Webex OAuth application client ID"
+        ),
+    ] = None,
+    client_secret: Annotated[
+        str | None,
+        typer.Option(
+            envvar="WEBEX_OAUTH_CLIENT_SECRET",
+            help="Webex OAuth application client secret",
+            hide_input=True,
+        ),
+    ] = None,
+) -> None:
+    """Check Webex OAuth authentication status."""
+    if not client_id:
+        client_id = typer.prompt("Webex OAuth Client ID")
+    if not client_secret:
+        client_secret = typer.prompt("Webex OAuth Client Secret", hide_input=True)
+
+    try:
+        app_config = WebexOAuthApp(client_id=client_id, client_secret=client_secret)
+        oauth_client = WebexOAuthClient(app_config)
+
+        credentials = oauth_client.load_credentials()
+        if not credentials:
+            typer.echo("❌ Not authenticated with Webex OAuth")
+            typer.echo("Run 'summarizer webex login' to authenticate")
+            return
+
+        if credentials.is_expired():
+            typer.echo("⚠️  Access token is expired")
+            try:
+                oauth_client.refresh_access_token(credentials)
+                typer.echo("✅ Token refreshed successfully")
+                credentials = oauth_client.load_credentials()
+            except Exception as e:
+                typer.echo(f"❌ Token refresh failed: {e}")
+                typer.echo("Run 'summarizer webex login' to re-authenticate")
+                return
+
+        typer.echo("✅ Authenticated with Webex OAuth")
+        typer.echo(f"Access token expires: {credentials.expires_at}")
+        typer.echo(f"Scopes: {credentials.scope}")
+
+    except Exception as e:
+        typer.echo(f"❌ Status check failed: {e}", err=True)
+        raise typer.Exit(1)
+
+
+@app.callback(invoke_without_command=True)
 def main(
+    ctx: typer.Context,
     # Webex (optional)
     user_email: Annotated[
         str | None,
@@ -390,9 +564,21 @@ def main(
         str | None,
         typer.Option(
             envvar="WEBEX_TOKEN",
-            help=(
-                "Webex access token (see https://developer.webex.com/docs/getting-started)"
-            ),
+            help="Webex access token (legacy - prefer OAuth)",
+            hide_input=True,
+        ),
+    ] = None,
+    webex_oauth_client_id: Annotated[
+        str | None,
+        typer.Option(
+            envvar="WEBEX_OAUTH_CLIENT_ID", help="Webex OAuth application client ID"
+        ),
+    ] = None,
+    webex_oauth_client_secret: Annotated[
+        str | None,
+        typer.Option(
+            envvar="WEBEX_OAUTH_CLIENT_SECRET",
+            help="Webex OAuth application client secret",
             hide_input=True,
         ),
     ] = None,
@@ -504,6 +690,11 @@ def main(
     ] = False,
 ) -> None:
     """Summarizer CLI (unified Webex + GitHub)."""
+
+    # If a subcommand was invoked, don't run the main logic
+    if ctx.invoked_subcommand is not None:
+        return
+
     # Setup debug logging if requested
     _setup_debug_logging(debug)
 
@@ -514,7 +705,13 @@ def main(
 
     # Determine which platforms are active
     webex_active, github_active = _determine_active_platforms(
-        webex_token, user_email, github_token, no_webex, no_github
+        webex_token,
+        user_email,
+        webex_oauth_client_id,
+        webex_oauth_client_secret,
+        github_token,
+        no_webex,
+        no_github,
     )
 
     # Build platform arguments
@@ -522,6 +719,8 @@ def main(
     webex_args = _build_webex_args(
         webex_token=webex_token,
         user_email=user_email,
+        webex_oauth_client_id=webex_oauth_client_id,
+        webex_oauth_client_secret=webex_oauth_client_secret,
         context_window_minutes=context_window_minutes,
         passive_participation=passive_participation,
         time_display_format=time_display_format,
