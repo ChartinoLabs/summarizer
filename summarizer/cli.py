@@ -159,9 +159,11 @@ def _parse_change_types(values: list[str] | None) -> set[ChangeType]:
             continue
         try:
             result.add(ChangeType[key.upper()])
-        except Exception:
-            # ignore unknown values
-            pass
+        except (KeyError, ValueError) as e:
+            # Log unknown change type values for debugging
+            import logging
+            logging.debug(f"Unknown change type '{key}': {e}")
+            continue
     return result or set(ChangeType)
 
 

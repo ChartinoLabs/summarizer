@@ -558,7 +558,9 @@ class GithubClient:
         try:
             # Issue URL ends with /issues/{number} or PR URL with /pulls/{number}
             return api_url.rstrip("/").split("/")[-1]
-        except Exception:
+        except (IndexError, AttributeError) as e:
+            # Log malformed URL for debugging
+            logger.debug(f"Failed to extract number from URL '{api_url}': {e}")
             return None
 
     @staticmethod
@@ -588,7 +590,9 @@ class GithubClient:
             # GraphQL returns ISO-8601; datetime.fromisoformat supports Z via replace
             v = value.replace("Z", "+00:00")
             return datetime.fromisoformat(v)
-        except Exception:
+        except (ValueError, AttributeError) as e:
+            # Log malformed ISO date for debugging
+            logger.debug(f"Failed to parse ISO date '{value}': {e}")
             return None
 
     @staticmethod
