@@ -271,6 +271,95 @@ def _build_github_config(
     )
 
 
+def _setup_debug_logging(debug: bool) -> None:
+    """Configure debug logging when requested."""
+    if not debug:
+        return
+        
+    # Set debug level for all relevant loggers
+    logging.getLogger().setLevel(logging.DEBUG)
+    logging.getLogger("summarizer.github.client").setLevel(logging.DEBUG)
+    logging.getLogger("summarizer.github.runner").setLevel(logging.DEBUG)
+    logger.setLevel(logging.DEBUG)
+
+    # Add console handler for debug output
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.DEBUG)
+    console_formatter = logging.Formatter("%(name)s: %(levelname)s: %(message)s")
+    console_handler.setFormatter(console_formatter)
+    logging.getLogger().addHandler(console_handler)
+
+    logger.debug("Debug logging enabled")
+
+
+def _determine_active_platforms(
+    webex_token: str | None,
+    user_email: str | None,
+    github_token: str | None,
+    no_webex: bool,
+    no_github: bool,
+) -> tuple[bool, bool]:
+    """Determine which platforms are active based on credentials and flags."""
+    webex_active = bool(webex_token and user_email) and not no_webex
+    github_active = bool(github_token) and not no_github
+    
+    if not webex_active and not github_active:
+        typer.echo(
+            "[red]No platforms are active. Either provide Webex and/or GitHub "
+            "credentials, or remove --no-webex/--no-github flags if credentials "
+            "are provided.[/red]"
+        )
+        raise typer.Exit(1)
+    
+    return webex_active, github_active
+
+
+def _execute_range_mode(
+    parsed_start_date: datetime,
+    parsed_end_date: datetime,
+    webex_active: bool,
+    github_active: bool,
+    webex_args: dict,
+    github_args: dict,
+) -> None:
+    """Execute processing for a date range."""
+    if parsed_start_date is None or parsed_end_date is None:
+        raise ValueError(
+            "Both start_date and end_date must be provided for range mode"
+        )
+    
+    current = parsed_start_date
+    while current <= parsed_end_date:
+        _execute_for_date(
+            date=current,
+            webex_active=webex_active,
+            github_active=github_active,
+            webex_args=webex_args,
+            github_args=github_args,
+        )
+        current += timedelta(days=1)
+
+
+def _execute_single_date_mode(
+    parsed_target_date: datetime,
+    webex_active: bool,
+    github_active: bool,
+    webex_args: dict,
+    github_args: dict,
+) -> None:
+    """Execute processing for a single date."""
+    if parsed_target_date is None:
+        raise ValueError("Target date must be provided for single date mode")
+    
+    _execute_for_date(
+        date=parsed_target_date,
+        webex_active=webex_active,
+        github_active=github_active,
+        webex_args=webex_args,
+        github_args=github_args,
+    )
+
+
 def _execute_for_date(
     *,
     date: datetime,
@@ -415,77 +504,20 @@ def main(
     ] = False,
 ) -> None:
     """Summarizer CLI (unified Webex + GitHub)."""
-    if debug is True:
-        # Set debug level for all relevant loggers
-        logging.getLogger().setLevel(logging.DEBUG)
-        logging.getLogger("summarizer.github.client").setLevel(logging.DEBUG)
-        logging.getLogger("summarizer.github.runner").setLevel(logging.DEBUG)
-        logger.setLevel(logging.DEBUG)
+    # Setup debug logging if requested
+    _setup_debug_logging(debug)
 
-        # Add console handler for debug output
-        console_handler = logging.StreamHandler()
-        console_handler.setLevel(logging.DEBUG)
-        console_formatter = logging.Formatter("%(name)s: %(levelname)s: %(message)s")
-        console_handler.setFormatter(console_formatter)
-        logging.getLogger().addHandler(console_handler)
-
-        logger.debug("Debug logging enabled")
-
+    # Parse and validate dates
     parsed_target_date, parsed_start_date, parsed_end_date, mode = (
         _validate_and_parse_dates(target_date, start_date, end_date)
     )
 
-    webex_active = bool(webex_token and user_email) and not no_webex
-    github_active = bool(github_token) and not no_github
-    if not webex_active and not github_active:
-        typer.echo(
-            "[red]No platforms are active. Either provide Webex and/or GitHub "
-            "credentials, or remove --no-webex/--no-github flags if credentials "
-            "are provided.[/red]"
-        )
-        raise typer.Exit(1)
+    # Determine which platforms are active
+    webex_active, github_active = _determine_active_platforms(
+        webex_token, user_email, github_token, no_webex, no_github
+    )
 
-    if mode == "range":
-        # Iterate over date range (inclusive)
-        current = parsed_start_date
-        if current is None or parsed_end_date is None:
-            raise ValueError(
-                "Both start_date and end_date must be provided for range mode"
-            )
-        active_types = _process_change_types(include, exclude)
-        webex_args = _build_webex_args(
-            webex_token=webex_token,
-            user_email=user_email,
-            context_window_minutes=context_window_minutes,
-            passive_participation=passive_participation,
-            time_display_format=time_display_format,
-            room_chunk_size=room_chunk_size,
-        )
-        github_args = _build_github_args(
-            github_token=github_token,
-            github_api_url=github_api_url,
-            github_graphql_url=github_graphql_url,
-            github_user=github_user,
-            org=_split_csv(org),
-            repo=_split_csv(repo),
-            include_types=active_types,
-            safe_rate=safe_rate,
-        )
-        while current <= parsed_end_date:
-            _execute_for_date(
-                date=current,
-                webex_active=webex_active,
-                github_active=github_active,
-                webex_args=webex_args,
-                github_args=github_args,
-            )
-            current += timedelta(days=1)
-        return
-
-    # Single date mode
-    if parsed_target_date is None:
-        raise ValueError("Target date must be provided for single date mode")
-    # Single date: print date header once and run selected platforms
+    # Build platform arguments
     active_types = _process_change_types(include, exclude)
     webex_args = _build_webex_args(
         webex_token=webex_token,
@@ -505,13 +537,25 @@ def main(
         include_types=active_types,
         safe_rate=safe_rate,
     )
-    _execute_for_date(
-        date=parsed_target_date,
-        webex_active=webex_active,
-        github_active=github_active,
-        webex_args=webex_args,
-        github_args=github_args,
-    )
+
+    # Execute based on mode
+    if mode == "range":
+        _execute_range_mode(
+            parsed_start_date,
+            parsed_end_date,
+            webex_active,
+            github_active,
+            webex_args,
+            github_args,
+        )
+    else:
+        _execute_single_date_mode(
+            parsed_target_date,
+            webex_active,
+            github_active,
+            webex_args,
+            github_args,
+        )
 
 
 if __name__ == "__main__":
