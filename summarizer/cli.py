@@ -172,6 +172,57 @@ def _split_csv(value: str | None) -> list[str] | None:
     return [p for p in parts if p]
 
 
+def _build_webex_args(
+    *,
+    webex_token: str | None,
+    user_email: str | None,
+    context_window_minutes: int,
+    passive_participation: bool,
+    time_display_format: TimeDisplayFormat,
+    room_chunk_size: int,
+) -> dict:
+    """Build Webex arguments dictionary for _execute_for_date."""
+    return dict(
+        webex_token=webex_token,
+        user_email=user_email,
+        context_window_minutes=context_window_minutes,
+        passive_participation=passive_participation,
+        time_display_format=time_display_format,
+        room_chunk_size=room_chunk_size,
+    )
+
+
+def _build_github_args(
+    *,
+    github_token: str | None,
+    github_api_url: str,
+    github_graphql_url: str | None,
+    github_user: str | None,
+    org: list[str] | None,
+    repo: list[str] | None,
+    include_types: set[ChangeType],
+    safe_rate: bool,
+) -> dict:
+    """Build GitHub arguments dictionary for _execute_for_date."""
+    return dict(
+        github_token=github_token,
+        github_api_url=github_api_url,
+        github_graphql_url=github_graphql_url,
+        github_user=github_user,
+        org=org,
+        repo=repo,
+        include_types=include_types,
+        safe_rate=safe_rate,
+    )
+
+
+def _process_change_types(include: str | None, exclude: str | None) -> set[ChangeType]:
+    """Process include/exclude change type filters."""
+    include_types = _parse_change_types(_split_csv(include))
+    exclude_types = _parse_change_types(_split_csv(exclude))
+    return include_types - exclude_types
+
+
 def _build_webex_config(
     *,
     date: datetime,
@@ -399,10 +450,8 @@ def main(
             raise ValueError(
                 "Both start_date and end_date must be provided for range mode"
             )
-        include_types = _parse_change_types(_split_csv(include))
-        exclude_types = _parse_change_types(_split_csv(exclude))
-        active_types = include_types - exclude_types
-        webex_args = dict(
+        active_types = _process_change_types(include, exclude)
+        webex_args = _build_webex_args(
             webex_token=webex_token,
             user_email=user_email,
             context_window_minutes=context_window_minutes,
@@ -410,7 +459,7 @@ def main(
             time_display_format=time_display_format,
             room_chunk_size=room_chunk_size,
         )
-        github_args = dict(
+        github_args = _build_github_args(
             github_token=github_token,
             github_api_url=github_api_url,
             github_graphql_url=github_graphql_url,
@@ -435,10 +484,8 @@ def main(
     if parsed_target_date is None:
         raise ValueError("Target date must be provided for single date mode")
     # Single date: print date header once and run selected platforms
-    include_types = _parse_change_types(_split_csv(include))
-    exclude_types = _parse_change_types(_split_csv(exclude))
-    active_types = include_types - exclude_types
-    webex_args = dict(
+    active_types = _process_change_types(include, exclude)
+    webex_args = _build_webex_args(
         webex_token=webex_token,
         user_email=user_email,
         context_window_minutes=context_window_minutes,
@@ -446,7 +493,7 @@ def main(
         time_display_format=time_display_format,
         room_chunk_size=room_chunk_size,
     )
-    github_args = dict(
+    github_args = _build_github_args(
         github_token=github_token,
         github_api_url=github_api_url,
         github_graphql_url=github_graphql_url,
