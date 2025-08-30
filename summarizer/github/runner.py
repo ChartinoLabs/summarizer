@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime, timedelta, tzinfo
+from zoneinfo import ZoneInfo
 
 from summarizer.common.console_ui import (
     console,
@@ -47,7 +48,6 @@ class GithubRunner(BaseRunner):
     # Override BaseRunner.run to avoid conversation grouping
     def run(self, date_header: bool = False) -> None:  # type: ignore[override]
         """Execute the GitHub flow for a single date."""
-        local_tz = datetime.now().astimezone().tzinfo or UTC
         if date_header:
             from summarizer.common.console_ui import print_date_header
 
@@ -56,10 +56,21 @@ class GithubRunner(BaseRunner):
         with console.status("[bold green]Connecting to APIs...[/]"):
             self.connect()
 
-        # Determine start/end for the given date in local timezone
-        target = self.config.target_date.astimezone(local_tz)
-        start = datetime(target.year, target.month, target.day, tzinfo=local_tz)
-        end = start + timedelta(days=1)
+        # Use Pacific Time date boundaries to match GitHub's contribution calendar
+        # GitHub uses Pacific Time (US/Pacific) for determining which day
+        # contributions belong to. This prevents timezone-related date leakage.
+        github_tz = ZoneInfo('US/Pacific')
+        target_date = self.config.target_date.date()  # Get just the date part
+
+        # Create the date boundaries in Pacific Time, then convert to UTC
+        pt_start = datetime.combine(
+            target_date, datetime.min.time()
+        ).replace(tzinfo=github_tz)
+        pt_end = pt_start + timedelta(days=1)
+
+        # Convert to UTC for the API calls
+        start = pt_start.astimezone(UTC)
+        end = pt_end.astimezone(UTC)
 
         if not self.client:
             raise RuntimeError("Must call connect() before run()")
