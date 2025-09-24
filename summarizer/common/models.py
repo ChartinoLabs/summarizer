@@ -87,4 +87,5 @@ class Change:
     title: str
     url: str
     summary: str | None = None
+    branch_name: str | None = None  # Branch name for commits
     metadata: dict[str, str] = field(default_factory=dict)

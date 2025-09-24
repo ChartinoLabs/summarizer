@@ -226,11 +226,15 @@ def display_changes(
     table.add_column("Time", style="cyan", no_wrap=True)
     table.add_column("Type", style="magenta", no_wrap=True)
     table.add_column("Repo", style="green", no_wrap=True)
+    table.add_column("Branch", style="yellow", no_wrap=True)
     table.add_column("Title", style="white", no_wrap=False, overflow="fold")
 
     for ch in sorted_changes:
         time_str = _format_time(ch.timestamp, time_display_format)
-        table.add_row(time_str, ch.type.value, ch.repo_full_name, ch.title)
+        branch_display = ch.branch_name or "-"
+        table.add_row(
+            time_str, ch.type.value, ch.repo_full_name, branch_display, ch.title
+        )
 
     console.print(table)
 
