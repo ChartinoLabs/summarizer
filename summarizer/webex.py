@@ -170,7 +170,7 @@ class WebexClient:
         return active_rooms
 
     def get_messages_for_rooms(
-        self, rooms: list[Room], date: datetime, local_tz: tzinfo
+        self, rooms: list[Room], date: datetime, local_tz: tzinfo, all_messages_flag: bool = False
     ) -> list[Message]:
         """Get all messages for the given rooms and date."""
         messages: list[Message] = []
@@ -195,6 +195,7 @@ class WebexClient:
                         self.config.user_email,
                         room,
                         local_tz,
+                        all_messages_flag,
                     ): room
                     for room in rooms
                 }
@@ -355,14 +356,14 @@ class WebexClient:
         return messages
 
     def get_activity(
-        self, date: datetime, local_tz: tzinfo, room_chunk_size: int = 50
+        self, date: datetime, local_tz: tzinfo, room_chunk_size: int = 50, all_messages_flag: bool = False
     ) -> list[Message]:
         """Get all activity for the specified date as a list of Message objects."""
         active_rooms = self.get_rooms_active_since_date(date)
         logger.info(
             "A total of %d active rooms were found on date %s", len(active_rooms), date
         )
-        messages = self.get_messages_for_rooms(active_rooms, date, local_tz)
+        messages = self.get_messages_for_rooms(active_rooms, date, local_tz, all_messages_flag)
         logger.info("A total of %d messages were found on date %s", len(messages), date)
         messages.sort(key=lambda x: x.timestamp)
         return messages
@@ -400,9 +401,10 @@ def build_analysis_result(
     last_activity: datetime | None,
     had_activity_on_or_after_date: bool,
     user_sent: bool,
+    all_messages_flag: bool = False,
 ) -> MessageAnalysisResult:
     """Build the MessageAnalysisResult based on whether the user sent a message."""
-    if user_sent:
+    if user_sent or all_messages_flag:
         return MessageAnalysisResult(
             room=room,
             messages=all_messages,
@@ -419,12 +421,12 @@ def build_analysis_result(
 
 
 def get_messages(
-    client: WebexAPI, date: datetime, user_email: str, room: Room, local_tz: tzinfo
+    client: WebexAPI, date: datetime, user_email: str, room: Room, local_tz: tzinfo, all_messages_flag: bool = False
 ) -> MessageAnalysisResult:
     """Get all messages for a specific date in a room.
 
     Only returns messages if the user sent at least one message in that room on that
-    date.
+    date, unless all_messages_flag is True which returns all messages regardless.
     """
     all_messages: list[Message] = []
     user_sent = False
@@ -480,4 +482,5 @@ def get_messages(
         last_activity,
         had_activity_on_or_after_date,
         user_sent,
+        all_messages_flag,
     )

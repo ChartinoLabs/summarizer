@@ -34,6 +34,7 @@ def find_conversation_windows(
     context_window: timedelta,
     user_id: str,
     include_passive: bool,
+    all_messages: bool = False,
 ) -> list[list[Message]]:
     """Find conversation windows in a list of messages for a space."""
     space_messages = sorted(space_messages, key=lambda m: m.timestamp)
@@ -43,7 +44,7 @@ def find_conversation_windows(
         if i in used_indices:
             continue
         is_sent_by_user = msg.sender.id == user_id
-        if not is_sent_by_user and not include_passive:
+        if not is_sent_by_user and not include_passive and not all_messages:
             continue
         window_start = msg.timestamp - context_window
         window_end = msg.timestamp + context_window
@@ -111,11 +112,12 @@ def group_dm_conversations(
     user_id: str,
     include_passive: bool = False,
     client: WebexAPI | None = None,
+    all_messages: bool = False,
 ) -> list[Conversation]:
     """Group messages in DM space into conversations based on time context window.
 
     Only includes conversations where the authenticated user sent at least one message,
-    unless include_passive is True.
+    unless include_passive is True or all_messages is True.
     The slug for the conversation ID is always the other participant (not the
     authenticated user).
     """
@@ -128,7 +130,7 @@ def group_dm_conversations(
 
     for space_messages in messages_by_space.values():
         windows = find_conversation_windows(
-            space_messages, context_window, user_id, include_passive
+            space_messages, context_window, user_id, include_passive, all_messages
         )
         for convo_msgs in windows:
             conversation = build_dm_conversation(
@@ -160,13 +162,14 @@ def _create_thread_conversations(
     thread_owners: dict[str, str],
     user_id: str,
     conversation_id_start: int = 1,
+    all_messages: bool = False,
 ) -> tuple[list[Conversation], int]:
-    """Create Conversation objects for threads the user participated in."""
+    """Create Conversation objects for threads the user participated in, or all threads if all_messages=True."""
     conversations: list[Conversation] = []
     conversation_id_counter = conversation_id_start
     for thread_id, msgs in thread_conversations.items():
         user_participated = any(m.sender.id == user_id for m in msgs)
-        if not user_participated:
+        if not user_participated and not all_messages:
             continue
         # Always include the original post
         original_poster_id = thread_owners[thread_id]
@@ -202,8 +205,12 @@ def _group_non_threaded_messages(
     user_id: str,
     used_indices: set[int],
     conversation_id_start: int = 1,
+    all_messages: bool = False,
 ) -> list[Conversation]:
-    """Group non-threaded messages into conversations using context window logic."""
+    """Group non-threaded messages into conversations using context window logic.
+    
+    Only processes messages sent by the user unless all_messages=True.
+    """
     conversations: list[Conversation] = []
     conversation_id_counter = conversation_id_start
     messages = sorted(messages, key=lambda m: m.timestamp)
@@ -212,7 +219,7 @@ def _group_non_threaded_messages(
             continue
         if msg.thread is not None:
             continue  # Already handled
-        if msg.sender.id != user_id:
+        if msg.sender.id != user_id and not all_messages:
             continue
         window_start = msg.timestamp - context_window
         window_end = msg.timestamp + context_window
@@ -248,7 +255,7 @@ def _group_non_threaded_messages(
 
 
 def group_group_conversations(
-    messages: list[Message], context_window: timedelta, user_id: str
+    messages: list[Message], context_window: timedelta, user_id: str, all_messages: bool = False
 ) -> list[Conversation]:
     """Group messages in group spaces into conversations using heuristics.
 
@@ -261,6 +268,7 @@ def group_group_conversations(
       the user.
     - Each message can only belong to one conversation.
     - Messages are grouped by space first to prevent cross-space contamination.
+    - If all_messages is True, includes conversations where the user didn't participate.
     """
     if not messages:
         return []
@@ -274,7 +282,7 @@ def group_group_conversations(
         space_messages = sorted(space_messages, key=lambda m: m.timestamp)
         # Check if the authenticated user participated in this space
         user_participated = any(m.sender.id == user_id for m in space_messages)
-        if not user_participated:
+        if not user_participated and not all_messages:
             continue
         used_indices: set[int] = set()
         # Threaded
@@ -284,6 +292,7 @@ def group_group_conversations(
             thread_owners,
             user_id,
             conversation_id_start=conversation_id_counter,
+            all_messages=all_messages,
         )
         conversations.extend(thread_convos)
         conversation_id_counter = next_id
@@ -298,6 +307,7 @@ def group_group_conversations(
             user_id,
             used_indices,
             conversation_id_start=conversation_id_counter,
+            all_messages=all_messages,
         )
         conversations.extend(nonthread_convos)
         conversation_id_counter += len(nonthread_convos)
@@ -311,6 +321,7 @@ def group_all_conversations(
     user_id: str,
     include_passive: bool = False,
     client: WebexAPI | None = None,
+    all_messages: bool = False,
 ) -> list[Conversation]:
     """Group all messages (DM and group spaces) into conversations.
 
@@ -332,10 +343,11 @@ def group_all_conversations(
                 user_id,
                 include_passive=include_passive,
                 client=client,
+                all_messages=all_messages,
             )
         )
     if groups:
-        conversations.extend(group_group_conversations(groups, context_window, user_id))
+        conversations.extend(group_group_conversations(groups, context_window, user_id, all_messages))
     logger.info(
         "Grouped %d messages into %d conversations", len(messages), len(conversations)
     )
