@@ -188,6 +188,7 @@ def _run_date_range(
     max_messages: int,
     room_search_mode: str | None,
     room_search_value: str | None,
+    all_messages: bool,
 ) -> None:
     """Execute date range workflow."""
     current = parsed_start_date
@@ -201,6 +202,7 @@ def _run_date_range(
             time_display_format=time_display_format,
             room_chunk_size=room_chunk_size,
             max_messages=max_messages,
+            all_messages=all_messages,
         )
         _run_for_date(
             config,
@@ -321,6 +323,12 @@ def main(
     max_messages: Annotated[
         int, typer.Option(help="Maximum number of messages to retrieve from room")
     ] = 1000,
+    all_messages: Annotated[
+        bool,
+        typer.Option(
+            help="Retrieve ALL messages from room regardless of user participation"
+        ),
+    ] = False,
 ) -> None:
     """Webex Summarizer CLI (Typer config parsing demo)."""
     if debug is True:
@@ -354,6 +362,7 @@ def main(
             max_messages,
             room_search_mode,
             room_search_value,
+            all_messages,
         )
         return
 
@@ -371,6 +380,7 @@ def main(
         time_display_format=time_display_format.value,
         room_chunk_size=room_chunk_size,
         max_messages=max_messages,
+        all_messages=all_messages,
     )
 
     # Determine if we should apply date filtering

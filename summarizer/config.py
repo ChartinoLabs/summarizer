@@ -19,6 +19,7 @@ class AppConfig:
     time_display_format: Literal["12h", "24h"] = "12h"
     room_chunk_size: int = 50
     max_messages: int = 1000
+    all_messages: bool = False
 
 
 def load_config_from_env() -> None:
