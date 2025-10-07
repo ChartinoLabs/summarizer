@@ -2,7 +2,7 @@
 
 import logging
 import re
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from webexpythonsdk import WebexAPI
 
@@ -164,7 +164,10 @@ def _create_thread_conversations(
     conversation_id_start: int = 1,
     all_messages: bool = False,
 ) -> tuple[list[Conversation], int]:
-    """Create Conversation objects for threads the user participated in, or all threads if all_messages=True."""
+    """Create Conversation objects for threads the user participated in.
+
+    Or all threads if all_messages=True.
+    """
     conversations: list[Conversation] = []
     conversation_id_counter = conversation_id_start
     for thread_id, msgs in thread_conversations.items():
@@ -199,6 +202,61 @@ def _create_thread_conversations(
     return conversations, conversation_id_counter
 
 
+def _should_skip_message(
+    msg: Message, index: int, used_indices: set[int], user_id: str, all_messages: bool
+) -> bool:
+    """Check if a message should be skipped in non-threaded grouping."""
+    if index in used_indices:
+        return True
+    if msg.thread is not None:
+        return True
+    if msg.sender.id != user_id and not all_messages:
+        return True
+    return False
+
+
+def _collect_window_messages(
+    messages: list[Message],
+    start_index: int,
+    window_start: datetime,
+    window_end: datetime,
+    used_indices: set[int],
+) -> list[Message]:
+    """Collect messages within the specified time window."""
+    collected = []
+    for j in range(start_index, len(messages)):
+        m2 = messages[j]
+        if m2.thread is not None:
+            continue
+        if window_start <= m2.timestamp <= window_end:
+            collected.append(m2)
+            used_indices.add(j)
+        elif m2.timestamp > window_end:
+            break
+    return collected
+
+
+def _create_group_conversation(
+    convo_msgs: list[Message], slug: str, conversation_id: int
+) -> Conversation:
+    """Create a Conversation object from grouped messages."""
+    participants = {m.sender.id: m.sender for m in convo_msgs}
+    first_msg = convo_msgs[0]
+    return Conversation(
+        id=f"group-nonthread-{slug}-{conversation_id}",
+        space_id=first_msg.space_id,
+        space_type=first_msg.space_type,
+        participants=list(participants.values()),
+        messages=convo_msgs,
+        start_time=convo_msgs[0].timestamp,
+        end_time=convo_msgs[-1].timestamp,
+        duration_seconds=int(
+            (convo_msgs[-1].timestamp - convo_msgs[0].timestamp).total_seconds()
+        ),
+        is_threaded=False,
+    )
+
+
 def _group_non_threaded_messages(
     messages: list[Message],
     context_window: timedelta,
@@ -208,54 +266,44 @@ def _group_non_threaded_messages(
     all_messages: bool = False,
 ) -> list[Conversation]:
     """Group non-threaded messages into conversations using context window logic.
-    
+
     Only processes messages sent by the user unless all_messages=True.
     """
     conversations: list[Conversation] = []
     conversation_id_counter = conversation_id_start
     messages = sorted(messages, key=lambda m: m.timestamp)
+
     for i, msg in enumerate(messages):
-        if i in used_indices:
+        if _should_skip_message(msg, i, used_indices, user_id, all_messages):
             continue
-        if msg.thread is not None:
-            continue  # Already handled
-        if msg.sender.id != user_id and not all_messages:
-            continue
+
         window_start = msg.timestamp - context_window
         window_end = msg.timestamp + context_window
         convo_msgs = [msg]
         used_indices.add(i)
-        for j in range(i + 1, len(messages)):
-            m2 = messages[j]
-            if m2.thread is not None:
-                continue  # Skip threaded messages
-            if window_start <= m2.timestamp <= window_end:
-                convo_msgs.append(m2)
-                used_indices.add(j)
-            elif m2.timestamp > window_end:
-                break
-        participants = {m.sender.id: m.sender for m in convo_msgs}
+
+        # Collect messages within the time window
+        window_msgs = _collect_window_messages(
+            messages, i + 1, window_start, window_end, used_indices
+        )
+        convo_msgs.extend(window_msgs)
+
+        # Create and append conversation
         slug = slugify(msg.space_name)
-        conversation = Conversation(
-            id=f"group-nonthread-{slug}-{conversation_id_counter}",
-            space_id=msg.space_id,
-            space_type=msg.space_type,
-            participants=list(participants.values()),
-            messages=convo_msgs,
-            start_time=convo_msgs[0].timestamp,
-            end_time=convo_msgs[-1].timestamp,
-            duration_seconds=int(
-                (convo_msgs[-1].timestamp - convo_msgs[0].timestamp).total_seconds()
-            ),
-            is_threaded=False,
+        conversation = _create_group_conversation(
+            convo_msgs, slug, conversation_id_counter
         )
         conversations.append(conversation)
         conversation_id_counter += 1
+
     return conversations
 
 
 def group_group_conversations(
-    messages: list[Message], context_window: timedelta, user_id: str, all_messages: bool = False
+    messages: list[Message],
+    context_window: timedelta,
+    user_id: str,
+    all_messages: bool = False,
 ) -> list[Conversation]:
     """Group messages in group spaces into conversations using heuristics.
 
@@ -347,7 +395,9 @@ def group_all_conversations(
             )
         )
     if groups:
-        conversations.extend(group_group_conversations(groups, context_window, user_id, all_messages))
+        conversations.extend(
+            group_group_conversations(groups, context_window, user_id, all_messages)
+        )
     logger.info(
         "Grouped %d messages into %d conversations", len(messages), len(conversations)
     )

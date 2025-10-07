@@ -1,7 +1,6 @@
 """Tests for YAML utilities."""
 
 from pathlib import Path
-from unittest.mock import mock_open, patch
 
 import pytest
 import yaml
@@ -27,9 +26,7 @@ class TestUserMember:
 
     def test_user_member_without_reports_to(self) -> None:
         """Test that reports_to field is optional."""
-        user = UserMember(
-            username="jsmith", cec_id="jsmith", full_name="John Smith"
-        )
+        user = UserMember(username="jsmith", cec_id="jsmith", full_name="John Smith")
         assert user.reports_to is None
 
     def test_empty_cec_id_raises_error(self) -> None:
@@ -52,9 +49,7 @@ class TestTeamYAML:
             name="test-team",
             description="Test team description",
             members=[
-                UserMember(
-                    username="jsmith", cec_id="jsmith", full_name="John Smith"
-                ),
+                UserMember(username="jsmith", cec_id="jsmith", full_name="John Smith"),
                 UserMember(username="jdoe", cec_id="jdoe", full_name="Jane Doe"),
             ],
         )

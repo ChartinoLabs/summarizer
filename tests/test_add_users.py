@@ -1,6 +1,6 @@
 """Tests for add_users_to_room functionality."""
 
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import MagicMock, Mock
 
 import pytest
 import requests
@@ -60,9 +60,7 @@ class TestAddUsersToRoom:
         return MagicMock()
 
     @pytest.fixture
-    def client(
-        self, config: AppConfig, mock_webex_api: MagicMock
-    ) -> WebexClient:
+    def client(self, config: AppConfig, mock_webex_api: MagicMock) -> WebexClient:
         """Create a WebexClient with mocked API."""
         return WebexClient(config, client=mock_webex_api)
 
@@ -114,9 +112,7 @@ class TestAddUsersToRoom:
     ) -> None:
         """Test that ApiError is raised when room is not found."""
         # Mock room retrieval to raise 404
-        mock_webex_api.rooms.get.side_effect = create_mock_api_error(
-            404, "Not Found"
-        )
+        mock_webex_api.rooms.get.side_effect = create_mock_api_error(404, "Not Found")
 
         emails = ["user1@cisco.com"]
 
@@ -163,9 +159,7 @@ class TestAddUsersToRoom:
         mock_webex_api.rooms.get.return_value = mock_room
 
         # Mock membership creation with unexpected error
-        mock_webex_api.memberships.create.side_effect = ValueError(
-            "Unexpected error"
-        )
+        mock_webex_api.memberships.create.side_effect = ValueError("Unexpected error")
 
         emails = ["user1@cisco.com"]
         successful, failed = client.add_users_to_room("room123", emails)

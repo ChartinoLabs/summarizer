@@ -482,13 +482,12 @@ def add_users(
 
     # Display results
     console.print(
-        f"\n[bold green]Successfully added {len(successful)} users to the room[/bold green]"
+        f"\n[bold green]Successfully added {len(successful)} users "
+        f"to the room[/bold green]"
     )
 
     if failed:
-        console.print(
-            f"[bold yellow]Failed to add {len(failed)} users[/bold yellow]"
-        )
+        console.print(f"[bold yellow]Failed to add {len(failed)} users[/bold yellow]")
 
         # Write failed additions to a report file
         failed_report_path = Path("failed_additions.yaml")

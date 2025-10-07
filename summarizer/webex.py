@@ -170,7 +170,11 @@ class WebexClient:
         return active_rooms
 
     def get_messages_for_rooms(
-        self, rooms: list[Room], date: datetime, local_tz: tzinfo, all_messages_flag: bool = False
+        self,
+        rooms: list[Room],
+        date: datetime,
+        local_tz: tzinfo,
+        all_messages_flag: bool = False,
     ) -> list[Message]:
         """Get all messages for the given rooms and date."""
         messages: list[Message] = []
@@ -356,14 +360,20 @@ class WebexClient:
         return messages
 
     def get_activity(
-        self, date: datetime, local_tz: tzinfo, room_chunk_size: int = 50, all_messages_flag: bool = False
+        self,
+        date: datetime,
+        local_tz: tzinfo,
+        room_chunk_size: int = 50,
+        all_messages_flag: bool = False,
     ) -> list[Message]:
         """Get all activity for the specified date as a list of Message objects."""
         active_rooms = self.get_rooms_active_since_date(date)
         logger.info(
             "A total of %d active rooms were found on date %s", len(active_rooms), date
         )
-        messages = self.get_messages_for_rooms(active_rooms, date, local_tz, all_messages_flag)
+        messages = self.get_messages_for_rooms(
+            active_rooms, date, local_tz, all_messages_flag
+        )
         logger.info("A total of %d messages were found on date %s", len(messages), date)
         messages.sort(key=lambda x: x.timestamp)
         return messages
@@ -430,12 +440,16 @@ class WebexClient:
                         successful.append(email)
                     else:
                         # Log and track other errors
-                        logger.warning("Failed to add %s to room %s: %s", email, room_id, e)
+                        logger.warning(
+                            "Failed to add %s to room %s: %s", email, room_id, e
+                        )
                         failed.append((email, error_msg))
                 except Exception as e:
                     # Catch any non-API errors
                     error_msg = f"Unexpected error: {e}"
-                    logger.error("Unexpected error adding %s to room %s: %s", email, room_id, e)
+                    logger.error(
+                        "Unexpected error adding %s to room %s: %s", email, room_id, e
+                    )
                     failed.append((email, error_msg))
 
                 progress.update(task, advance=1)
@@ -500,7 +514,12 @@ def build_analysis_result(
 
 
 def get_messages(
-    client: WebexAPI, date: datetime, user_email: str, room: Room, local_tz: tzinfo, all_messages_flag: bool = False
+    client: WebexAPI,
+    date: datetime,
+    user_email: str,
+    room: Room,
+    local_tz: tzinfo,
+    all_messages_flag: bool = False,
 ) -> MessageAnalysisResult:
     """Get all messages for a specific date in a room.
 
