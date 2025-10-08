@@ -55,42 +55,43 @@ class WebexConfig(BaseConfig):
         self.room_chunk_size = room_chunk_size
         self.max_messages = max_messages
         self.all_messages = all_messages
-        
+
         # Initialize OAuth client if credentials provided
         self._oauth_client: WebexOAuthClient | None = None
         if oauth_client_id and oauth_client_secret:
             app_config = WebexOAuthApp(
                 client_id=oauth_client_id,
                 client_secret=oauth_client_secret,
-                redirect_uri=oauth_redirect_uri
+                redirect_uri=oauth_redirect_uri,
             )
             self._oauth_client = WebexOAuthClient(app_config)
 
     def get_platform_name(self) -> str:
         """Return the name of the platform this config is for."""
         return "webex"
-    
+
     def is_active(self) -> bool:
         """Check if Webex is configured and active."""
         return bool(self.user_email and (self.webex_token or self._oauth_client))
-    
+
     def has_oauth_config(self) -> bool:
         """Check if OAuth configuration is available."""
         return self._oauth_client is not None
-    
+
     def get_oauth_client(self) -> WebexOAuthClient | None:
         """Get OAuth client if configured."""
         return self._oauth_client
-    
+
     def get_access_token(self) -> str | None:
         """Get a valid access token from either manual token or OAuth.
-        
+
         Returns:
             Valid access token or None if no authentication available
         """
         import logging
+
         logger = logging.getLogger(__name__)
-        
+
         # Try OAuth first (preferred method)
         if self._oauth_client:
             logger.debug("Attempting to get OAuth access token")
@@ -100,14 +101,16 @@ class WebexConfig(BaseConfig):
                     logger.debug("Successfully obtained OAuth access token")
                     return token
                 else:
-                    logger.debug("OAuth client returned None - no valid token available")
+                    logger.debug(
+                        "OAuth client returned None - no valid token available"
+                    )
             except Exception as e:
                 logger.debug(f"OAuth token retrieval failed: {e}")
-        
+
         # Fall back to manual token
         if self.webex_token:
             logger.debug("Using manual Webex token")
             return self.webex_token
-        
+
         logger.debug("No access token available")
         return None

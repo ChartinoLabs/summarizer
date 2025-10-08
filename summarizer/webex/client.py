@@ -95,18 +95,22 @@ class WebexClient:
     def __init__(self, config: WebexConfig, client: WebexAPI | None = None) -> None:
         """Initialize with configuration."""
         self.config = config
-        
+
         if client:
             self._client = client
         else:
             # Get access token from OAuth or manual token
             access_token = config.get_access_token()
             if not access_token:
-                raise ValueError("No valid Webex access token available. Please authenticate with OAuth or provide a manual token.")
-            
-            logger.debug(f"Initializing Webex client with token (length: {len(access_token)})")
+                raise ValueError(
+                    "No valid Webex access token available. Please authenticate with OAuth or provide a manual token."
+                )
+
+            logger.debug(
+                f"Initializing Webex client with token (length: {len(access_token)})"
+            )
             self._client = WebexAPI(access_token=access_token)
-        
+
         self._me: Person | None = None
 
     @property
@@ -130,23 +134,31 @@ class WebexClient:
                             try:
                                 credentials = oauth_client.load_credentials()
                                 if credentials:
-                                    logger.debug("Forcing token refresh due to 403 error")
-                                    refreshed = oauth_client.refresh_access_token(credentials)
+                                    logger.debug(
+                                        "Forcing token refresh due to 403 error"
+                                    )
+                                    refreshed = oauth_client.refresh_access_token(
+                                        credentials
+                                    )
                                     # Update the client with the refreshed token
-                                    self._client = WebexAPI(access_token=refreshed.access_token)
-                                    logger.debug("Retrying API call with refreshed token")
+                                    self._client = WebexAPI(
+                                        access_token=refreshed.access_token
+                                    )
+                                    logger.debug(
+                                        "Retrying API call with refreshed token"
+                                    )
                                     # Retry the API call once
                                     self._me = self._client.people.me()
                                     return sdk_person_to_user(self._me)
                             except Exception as refresh_error:
                                 logger.debug(f"Token refresh failed: {refresh_error}")
-                        
+
                         raise ValueError(
                             "Webex API access forbidden (403). This usually means:\n"
                             "1. Your OAuth token has expired or is invalid\n"
                             "2. Your token is missing required scopes (spark:messages_read, spark:rooms_read)\n"
                             "3. Your Webex account doesn't have the necessary permissions\n\n"
-                            f"Try re-authenticating with: summarizer webex login"
+                            "Try re-authenticating with: summarizer webex login"
                         ) from e
                     else:
                         raise ValueError(
@@ -161,9 +173,11 @@ class WebexClient:
                     raise ValueError(
                         "Webex API authentication failed (401). Your access token is invalid.\n"
                         "Please check your token and try again."
-                    ) from e  
+                    ) from e
                 else:
-                    raise ValueError(f"Webex API error ({e.response.status_code}): {e}") from e
+                    raise ValueError(
+                        f"Webex API error ({e.response.status_code}): {e}"
+                    ) from e
         return sdk_person_to_user(self._me)
 
     def get_rooms_active_since_date(self, date: datetime) -> list[Room]:

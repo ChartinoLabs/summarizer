@@ -5,7 +5,11 @@ from datetime import datetime, timedelta, tzinfo
 
 from webexpythonsdk.exceptions import ApiError
 
-from summarizer.common.console_ui import console
+from summarizer.common.console_ui import (
+    console,
+    display_conversations,
+    display_conversations_summary,
+)
 from summarizer.common.grouping import group_all_conversations
 from summarizer.common.models import Conversation, Message
 from summarizer.common.runner import BaseRunner
@@ -111,7 +115,8 @@ class WebexRunner(BaseRunner):
             ]
             console.print(
                 f"Filtered to [bold]{len(message_data)}[/] messages from "
-                f"[bold]{self.config.target_date.date()}[/] (out of {original_count} total)"
+                f"[bold]{self.config.target_date.date()}[/] "
+                f"(out of {original_count} total)"
             )
         return message_data
 
@@ -137,7 +142,8 @@ class WebexRunner(BaseRunner):
         """Display helpful error messages when room is not found."""
         if room_search_mode == "room_id":
             console.print(
-                "[yellow]Please verify the room ID is correct and you have access to it.[/]"
+                "[yellow]Please verify the room ID is correct and you "
+                "have access to it.[/]"
             )
         elif room_search_mode == "room_name":
             console.print(
