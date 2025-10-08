@@ -580,13 +580,13 @@ def webex_oauth_login(
         # Start interactive authentication
         credentials = oauth_client.start_interactive_auth()
 
-        typer.echo(f"✅ Successfully authenticated with Webex!")
+        typer.echo("✅ Successfully authenticated with Webex!")
         typer.echo(f"Access token expires: {credentials.expires_at}")
         typer.echo(f"Credentials saved to: {oauth_client.credentials_file}")
 
     except Exception as e:
         typer.echo(f"❌ Authentication failed: {e}", err=True)
-        raise typer.Exit(1)
+        raise typer.Exit(1) from e
 
 
 @webex_app.command("logout")
@@ -624,7 +624,7 @@ def webex_oauth_logout(
 
     except Exception as e:
         typer.echo(f"❌ Logout failed: {e}", err=True)
-        raise typer.Exit(1)
+        raise typer.Exit(1) from e
 
 
 @webex_app.command("status")
@@ -677,7 +677,7 @@ def webex_oauth_status(
 
     except Exception as e:
         typer.echo(f"❌ Status check failed: {e}", err=True)
-        raise typer.Exit(1)
+        raise typer.Exit(1) from e
 
 
 @app.command()
@@ -993,7 +993,6 @@ def main(
     ] = False,
 ) -> None:
     """Summarizer CLI (unified Webex + GitHub)."""
-
     # If a subcommand was invoked, don't run the main logic
     if ctx.invoked_subcommand is not None:
         return

@@ -59,13 +59,13 @@ class GithubRunner(BaseRunner):
         # Use Pacific Time date boundaries to match GitHub's contribution calendar
         # GitHub uses Pacific Time (US/Pacific) for determining which day
         # contributions belong to. This prevents timezone-related date leakage.
-        github_tz = ZoneInfo('US/Pacific')
+        github_tz = ZoneInfo("US/Pacific")
         target_date = self.config.target_date.date()  # Get just the date part
 
         # Create the date boundaries in Pacific Time, then convert to UTC
-        pt_start = datetime.combine(
-            target_date, datetime.min.time()
-        ).replace(tzinfo=github_tz)
+        pt_start = datetime.combine(target_date, datetime.min.time()).replace(
+            tzinfo=github_tz
+        )
         pt_end = pt_start + timedelta(days=1)
 
         # Convert to UTC for the API calls
