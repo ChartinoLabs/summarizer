@@ -1,16 +1,26 @@
 # Summarizer
 
-Summarizes the work a person has done within a given day across multiple applications. This is useful for asynchronous scrum check-ins or for use in other general work reporting systems.
+Summarizes the work a person has done within a given day across multiple applications, or retrieves the complete message history from specific Webex rooms/conversations. This is useful for asynchronous scrum check-ins, work reporting systems, or analyzing conversation history with specific teams or individuals.
 
 ## Supported Applications
 
 ### Webex
 
-Leverages the Webex API to identify what conversations the authenticated user has taken part in throughout the day. Information includes:
+Leverages the Webex API to provide two main capabilities:
 
-- Who the conversation was with (whether it was a direct message or a group conversation)
-- When the conversation started and ended
-- The duration of the conversation
+**Date-Based Activity Summary:**
+
+- Identifies what conversations the authenticated user participated in on specific dates
+- Shows who the conversation was with (direct message or group conversation)
+- Displays when conversations started and ended, plus duration
+- Groups messages into logical conversation windows
+
+**Room-Specific Message History:**
+
+- Retrieves complete message history from specific Webex rooms or DMs
+- Find rooms by exact Room ID, room name, or person name for DMs
+- Optional date filtering to narrow down results
+- Configurable message limits (default: 1000 messages)
 
 ### GitHub
 
@@ -173,8 +183,61 @@ uv run summarizer --target-date=2024-06-01
 # Only Webex
 uv run summarizer --no-github --target-date=2024-06-01
 
-# Only GitHub  
+# Only GitHub
 uv run summarizer --no-webex --target-date=2024-06-01
+```
+
+### Room-Specific Message History
+
+Retrieve complete message history from specific Webex rooms or DMs.
+
+#### Find Room by ID
+
+Use exact Webex Room ID (most precise method):
+
+```bash
+uv run summarizer --room-id=Y2lzY29zcGFyazovL3VzL1JPT00vYmJjZWEwN2QtOTU4...
+
+# With custom message limit
+uv run summarizer --room-id=Y2lzY29zcGFyazovL3VzL1JPT00vYmJjZWEwN2QtOTU4... --max-messages=500
+```
+
+#### Find Room by Name
+
+Use exact room name (case-sensitive):
+
+```bash
+uv run summarizer --room-name="AskCX Test Automation"
+
+# With environment variables
+export USER_EMAIL=you@example.com
+uv run summarizer --room-name="Daily Standup"
+```
+
+#### Find DM by Person Name
+
+Use exact person display name to find direct message conversation:
+
+```bash
+uv run summarizer --person-name="Andrea Testino"
+
+# With environment variables
+uv run summarizer --person-name="John Smith"
+```
+
+#### Combine Room Search with Date Filtering
+
+Retrieve messages from a specific room, filtered by date:
+
+```bash
+# Get messages from Andrea's DM for a specific date
+uv run summarizer --person-name="Andrea Testino" --target-date=2024-06-01
+
+# Get messages from team room for date range
+uv run summarizer --room-name="Team Meeting" --start-date=2024-06-01 --end-date=2024-06-03
+
+# With environment variables and custom message limit
+uv run summarizer --person-name="Andrea Testino" --target-date=2024-06-01 --max-messages=2000
 ```
 
 ### Other Options
@@ -188,6 +251,8 @@ Other options (with defaults):
 - `--passive-participation`: Include conversations where you only received messages (default: False)
 - `--time-display-format`: Time display format ('12h' or '24h', default: '12h')
 - `--room-chunk-size`: Room fetch chunk size (default: 50)
+- `--max-messages`: Maximum number of messages to retrieve from room (default: 1000)
+- `--all-messages`: Retrieve ALL messages from room regardless of user participation (default: False)
 - `--debug`: Enable debug logging.
 
 ## Troubleshooting

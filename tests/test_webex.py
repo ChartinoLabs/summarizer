@@ -73,6 +73,7 @@ class TestWebexClient(unittest.TestCase):
             user_email: str,
             room: Room,
             local_tz: tzinfo,
+            all_messages_flag: bool = False,
         ) -> MessageAnalysisResult:
             sender = User(id="user123", display_name="Test User")
             msg = Message(

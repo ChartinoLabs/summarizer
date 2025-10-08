@@ -3,6 +3,7 @@
 import logging
 from datetime import datetime, timedelta
 from enum import Enum
+from pathlib import Path
 from typing import Annotated
 
 import typer
@@ -75,6 +76,39 @@ def _handle_single_date(target_date: str | None) -> datetime:
         raise typer.Exit(1) from exc
 
 
+def _validate_room_parameters(
+    room_id: str | None,
+    room_name: str | None,
+    person_name: str | None,
+) -> str | None:
+    """Validate room-specific parameters and return the search mode.
+
+    Returns:
+        Search mode: 'room_id', 'room_name', 'person_name', or None if no room params.
+
+    Raises:
+        typer.Exit on validation error.
+    """
+    room_params = [room_id, room_name, person_name]
+    active_params = [p for p in room_params if p is not None]
+
+    if len(active_params) > 1:
+        typer.echo(
+            "[red]Cannot use multiple room identification options simultaneously. "
+            "Please choose only one of --room-id, --room-name, or --person-name.[/red]"
+        )
+        raise typer.Exit(1)
+
+    if room_id:
+        return "room_id"
+    elif room_name:
+        return "room_name"
+    elif person_name:
+        return "person_name"
+    else:
+        return None
+
+
 def _validate_and_parse_dates(
     target_date: str | None,
     start_date: str | None,
@@ -112,18 +146,80 @@ def _validate_and_parse_dates(
     return parsed_date, None, None, "single"
 
 
-def _run_webex_for_date(config: WebexConfig, date_header: bool) -> None:
+def _handle_room_search_dates(
+    room_search_mode: str | None,
+    target_date: str | None,
+    start_date: str | None,
+    end_date: str | None,
+) -> tuple[datetime | None, datetime | None, datetime | None, str | None]:
+    """Handle date parsing for room-based searches.
+
+    Returns:
+        (parsed_target_date, parsed_start_date, parsed_end_date, date_mode)
+    """
+    if room_search_mode:
+        # Room-based search - dates are optional for filtering
+        if target_date or start_date or end_date:
+            return _validate_and_parse_dates(target_date, start_date, end_date)
+        else:
+            # No date filtering - retrieve all messages from room
+            return None, None, None, None
+    else:
+        # Traditional date-based search - validate dates
+        parsed_target_date, parsed_start_date, parsed_end_date, date_mode = (
+            _validate_and_parse_dates(target_date, start_date, end_date)
+        )
+
+        # If no explicit date provided, prompt for one
+        if date_mode == "single" and target_date is None:
+            parsed_target_date = _handle_single_date(None)
+            date_mode = "single"
+        elif parsed_target_date is None and parsed_start_date is None:
+            typer.echo(
+                "[red]Please specify either date-based options (--target-date, "
+                "--start-date/--end-date) or room-based options (--room-id, "
+                "--room-name, --person-name).[/red]"
+            )
+            raise typer.Exit(1)
+
+        return parsed_target_date, parsed_start_date, parsed_end_date, date_mode
+
+
+def _run_webex_for_date(
+    config: WebexConfig,
+    date_header: bool,
+    room_search_mode: str | None = None,
+    room_search_value: str | None = None,
+    apply_date_filter: bool = True,
+) -> None:
+    """Run Webex summarizer for a specific date or room search."""
     logger.info("Attempting to log into Webex API as user %s", config.user_email)
-    logger.info("Targeted date for summarization: %s", config.target_date)
+    if room_search_mode:
+        logger.info(
+            "Room search mode: %s with value: %s",
+            room_search_mode,
+            room_search_value,
+        )
+        logger.info("Max messages to retrieve: %d", config.max_messages)
+    else:
+        logger.info("Targeted date for summarization: %s", config.target_date)
     logger.info("Context window size: %d minutes", config.context_window_minutes)
     logger.info("Passive participation: %s", config.passive_participation)
     logger.info("Time display format: %s", config.time_display_format)
     logger.info("Room fetch chunk size: %d", config.room_chunk_size)
+    logger.info("All messages mode: %s", config.all_messages)
+
     runner = WebexRunner(config)
-    runner.run(date_header=date_header)
+    runner.run(
+        date_header=date_header,
+        room_search_mode=room_search_mode,
+        room_search_value=room_search_value,
+        apply_date_filter=apply_date_filter,
+    )
 
 
 def _run_github_for_date(config: GithubConfig, date_header: bool) -> None:
+    """Run GitHub summarizer for a specific date."""
     logger.info("Attempting to access GitHub as user %s", config.user)
     logger.info("Targeted date for summarization: %s", config.target_date)
     runner = GithubRunner(config)
@@ -151,6 +247,7 @@ _INCLUDE_SYNONYMS: dict[str, ChangeType] = {
 
 
 def _parse_change_types(values: list[str] | None) -> set[ChangeType]:
+    """Parse change type values from CLI arguments."""
     if not values:
         return set(ChangeType)
     result: set[ChangeType] = set()
@@ -166,14 +263,13 @@ def _parse_change_types(values: list[str] | None) -> set[ChangeType]:
             result.add(ChangeType[key.upper()])
         except (KeyError, ValueError) as e:
             # Log unknown change type values for debugging
-            import logging
-
             logging.debug(f"Unknown change type '{key}': {e}")
             continue
     return result or set(ChangeType)
 
 
 def _split_csv(value: str | None) -> list[str] | None:
+    """Split comma-separated values into a list."""
     if value is None:
         return None
     parts = [p.strip() for p in value.replace("\n", ",").split(",")]
@@ -190,6 +286,8 @@ def _build_webex_args(
     passive_participation: bool,
     time_display_format: TimeDisplayFormat,
     room_chunk_size: int,
+    max_messages: int,
+    all_messages: bool,
 ) -> dict:
     """Build Webex arguments dictionary for _execute_for_date."""
     return dict(
@@ -201,6 +299,8 @@ def _build_webex_args(
         passive_participation=passive_participation,
         time_display_format=time_display_format,
         room_chunk_size=room_chunk_size,
+        max_messages=max_messages,
+        all_messages=all_messages,
     )
 
 
@@ -246,7 +346,10 @@ def _build_webex_config(
     passive_participation: bool,
     time_display_format: TimeDisplayFormat,
     room_chunk_size: int,
+    max_messages: int,
+    all_messages: bool,
 ) -> WebexConfig:
+    """Build WebexConfig for a specific date."""
     return WebexConfig(
         user_email=user_email or "",
         target_date=date,
@@ -257,6 +360,8 @@ def _build_webex_config(
         passive_participation=passive_participation,
         time_display_format=time_display_format.value,
         room_chunk_size=room_chunk_size,
+        max_messages=max_messages,
+        all_messages=all_messages,
     )
 
 
@@ -272,6 +377,7 @@ def _build_github_config(
     include_types: set[ChangeType],
     safe_rate: bool,
 ) -> GithubConfig:
+    """Build GithubConfig for a specific date."""
     return GithubConfig(
         github_token=github_token,
         target_date=date,
@@ -327,8 +433,6 @@ def _determine_active_platforms(
         elif webex_oauth_client_id and webex_oauth_client_secret:
             # Check if we have valid OAuth config or stored credentials
             try:
-                from summarizer.webex.oauth import WebexOAuthApp, WebexOAuthClient
-
                 app_config = WebexOAuthApp(
                     client_id=webex_oauth_client_id,
                     client_secret=webex_oauth_client_secret,
@@ -344,9 +448,10 @@ def _determine_active_platforms(
 
     if not webex_active and not github_active:
         typer.echo(
-            "[red]No platforms are active. For Webex, provide either:\n"
-            "  1. --webex-token and --user-email, OR\n"
-            "  2. --webex-oauth-client-id, --webex-oauth-client-secret, --user-email, and run 'summarizer webex login'\n"
+            "[red]No platforms are active. For Webex, provide either:\\n"
+            "  1. --webex-token and --user-email, OR\\n"
+            "  2. --webex-oauth-client-id, --webex-oauth-client-secret, --user-email, "
+            "and run 'summarizer webex login'\\n"
             "For GitHub, provide --github-token.[/red]"
         )
         raise typer.Exit(1)
@@ -361,6 +466,8 @@ def _execute_range_mode(
     github_active: bool,
     webex_args: dict,
     github_args: dict,
+    room_search_mode: str | None = None,
+    room_search_value: str | None = None,
 ) -> None:
     """Execute processing for a date range."""
     if parsed_start_date is None or parsed_end_date is None:
@@ -374,6 +481,9 @@ def _execute_range_mode(
             github_active=github_active,
             webex_args=webex_args,
             github_args=github_args,
+            room_search_mode=room_search_mode,
+            room_search_value=room_search_value,
+            apply_date_filter=True,
         )
         current += timedelta(days=1)
 
@@ -384,9 +494,12 @@ def _execute_single_date_mode(
     github_active: bool,
     webex_args: dict,
     github_args: dict,
+    room_search_mode: str | None = None,
+    room_search_value: str | None = None,
+    apply_date_filter: bool = True,
 ) -> None:
     """Execute processing for a single date."""
-    if parsed_target_date is None:
+    if parsed_target_date is None and not room_search_mode:
         raise ValueError("Target date must be provided for single date mode")
 
     _execute_for_date(
@@ -395,6 +508,9 @@ def _execute_single_date_mode(
         github_active=github_active,
         webex_args=webex_args,
         github_args=github_args,
+        room_search_mode=room_search_mode,
+        room_search_value=room_search_value,
+        apply_date_filter=apply_date_filter,
     )
 
 
@@ -405,13 +521,25 @@ def _execute_for_date(
     github_active: bool,
     webex_args: dict,
     github_args: dict,
+    room_search_mode: str | None = None,
+    room_search_value: str | None = None,
+    apply_date_filter: bool = True,
 ) -> None:
+    """Execute processing for a specific date with optional room search."""
     from summarizer.common.console_ui import print_date_header
 
-    print_date_header(date)
+    if date:
+        print_date_header(date)
+
     if webex_active:
         wcfg = _build_webex_config(date=date, **webex_args)
-        _run_webex_for_date(wcfg, date_header=False)
+        _run_webex_for_date(
+            wcfg,
+            date_header=False,
+            room_search_mode=room_search_mode,
+            room_search_value=room_search_value,
+            apply_date_filter=apply_date_filter,
+        )
     if github_active:
         gcfg = _build_github_config(date=date, **github_args)
         _run_github_for_date(gcfg, date_header=False)
@@ -552,6 +680,156 @@ def webex_oauth_status(
         raise typer.Exit(1)
 
 
+@app.command()
+def add_users(
+    webex_token: Annotated[
+        str | None,
+        typer.Option(
+            envvar="WEBEX_TOKEN",
+            help="Webex access token (legacy - prefer OAuth)",
+            hide_input=True,
+        ),
+    ] = None,
+    webex_oauth_client_id: Annotated[
+        str | None,
+        typer.Option(
+            envvar="WEBEX_OAUTH_CLIENT_ID", help="Webex OAuth application client ID"
+        ),
+    ] = None,
+    webex_oauth_client_secret: Annotated[
+        str | None,
+        typer.Option(
+            envvar="WEBEX_OAUTH_CLIENT_SECRET",
+            help="Webex OAuth application client secret",
+            hide_input=True,
+        ),
+    ] = None,
+    room_id: Annotated[
+        str,
+        typer.Option(..., help="Room ID to add users to"),
+    ] = "",
+    users_file: Annotated[
+        Path,
+        typer.Option(..., help="Path to YAML file containing user list"),
+    ] = Path(""),
+    debug: Annotated[bool, typer.Option(help="Enable debug logging")] = False,
+) -> None:
+    """Add users from a YAML file to a Webex room.
+
+    This command reads a YAML file containing team member information (with cec_id
+    fields) and adds each user to the specified Webex room. Users are added with
+    email addresses in the format {cec_id}@cisco.com.
+
+    The YAML file should follow the team structure with a 'members' list where each
+    member has a 'cec_id' field.
+
+    Example YAML structure:
+        name: team-name
+        members:
+          - username: jsmith
+            cec_id: jsmith
+            full_name: John Smith
+
+    Users who are already members of the room are counted as successful additions.
+    A report of failed additions (if any) will be written to failed_additions.yaml.
+    """
+    from summarizer.common.console_ui import console
+    from summarizer.webex.client import WebexClient
+    from summarizer.yaml_utils import load_users_from_yaml
+
+    if debug is True:
+        logger.setLevel(logging.DEBUG)
+        logger.debug("Debug logging enabled")
+
+    # Determine authentication method
+    if not webex_token and not (webex_oauth_client_id and webex_oauth_client_secret):
+        typer.echo(
+            "[red]Authentication required. Provide either:\\n"
+            "  1. --webex-token, OR\\n"
+            "  2. --webex-oauth-client-id and --webex-oauth-client-secret[/red]"
+        )
+        raise typer.Exit(1)
+
+    # Load user emails from YAML file
+    try:
+        user_emails = load_users_from_yaml(users_file)
+    except (FileNotFoundError, ValueError, Exception) as e:
+        console.print(f"[red]Error loading users from YAML file: {e}[/red]")
+        raise typer.Exit(1) from e
+
+    if not user_emails:
+        console.print("[yellow]No users found in YAML file. Exiting.[/yellow]")
+        raise typer.Exit(0)
+
+    console.print(f"[blue]Loaded {len(user_emails)} users from {users_file}[/blue]")
+
+    # Initialize Webex client with dummy config for add_users
+    from datetime import datetime
+
+    config = WebexConfig(
+        webex_token=webex_token,
+        oauth_client_id=webex_oauth_client_id,
+        oauth_client_secret=webex_oauth_client_secret,
+        user_email="",  # Not needed for this operation
+        target_date=datetime.now(),
+        context_window_minutes=0,
+        passive_participation=False,
+        time_display_format="12h",
+        room_chunk_size=50,
+        max_messages=1000,
+        all_messages=False,
+    )
+    client = WebexClient(config)
+
+    # Add users to room
+    try:
+        successful, failed = client.add_users_to_room(room_id, user_emails)
+    except Exception as e:
+        console.print(f"[red]Error adding users to room: {e}[/red]")
+        raise typer.Exit(1) from e
+
+    # Display results
+    console.print(
+        f"\n[bold green]Successfully added {len(successful)} users "
+        f"to the room[/bold green]"
+    )
+
+    if failed:
+        console.print(f"[bold yellow]Failed to add {len(failed)} users[/bold yellow]")
+
+        # Write failed additions to a report file
+        failed_report_path = Path("failed_additions.yaml")
+        try:
+            import yaml
+
+            failed_data = {
+                "room_id": room_id,
+                "timestamp": datetime.now().isoformat(),
+                "failed_users": [
+                    {"email": email, "error": error} for email, error in failed
+                ],
+            }
+
+            with failed_report_path.open("w") as f:
+                yaml.dump(failed_data, f, default_flow_style=False)
+
+            console.print(
+                f"[yellow]Failed additions written to {failed_report_path}[/yellow]"
+            )
+        except Exception as e:
+            logger.error("Failed to write error report: %s", e)
+            console.print(
+                f"[red]Warning: Could not write failed additions report: {e}[/red]"
+            )
+
+        # Also print failed users to console for immediate visibility
+        console.print("\n[yellow]Failed additions:[/yellow]")
+        for email, error in failed:
+            console.print(f"  - {email}: {error}")
+    else:
+        console.print("[bold green]All users added successfully![/bold green]")
+
+
 @app.callback(invoke_without_command=True)
 def main(
     ctx: typer.Context,
@@ -624,6 +902,31 @@ def main(
         TimeDisplayFormat, typer.Option(help="Time display format ('12h' or '24h')")
     ] = TimeDisplayFormat.h12,
     room_chunk_size: Annotated[int, typer.Option(help="Room fetch chunk size")] = 50,
+    room_id: Annotated[
+        str | None,
+        typer.Option(
+            help="Specific room ID to retrieve all messages from (exact match)"
+        ),
+    ] = None,
+    room_name: Annotated[
+        str | None,
+        typer.Option(
+            help="Specific room name to retrieve all messages from (exact match)"
+        ),
+    ] = None,
+    person_name: Annotated[
+        str | None,
+        typer.Option(help="Person name to find DM room with (exact match)"),
+    ] = None,
+    max_messages: Annotated[
+        int, typer.Option(help="Maximum number of messages to retrieve from room")
+    ] = 1000,
+    all_messages: Annotated[
+        bool,
+        typer.Option(
+            help="Retrieve ALL messages from room regardless of user participation"
+        ),
+    ] = False,
     # GitHub (all optional; presence of token activates)
     github_token: Annotated[
         str | None,
@@ -698,9 +1001,13 @@ def main(
     # Setup debug logging if requested
     _setup_debug_logging(debug)
 
-    # Parse and validate dates
-    parsed_target_date, parsed_start_date, parsed_end_date, mode = (
-        _validate_and_parse_dates(target_date, start_date, end_date)
+    # Validate room parameters and get search mode
+    room_search_mode = _validate_room_parameters(room_id, room_name, person_name)
+    room_search_value = room_id or room_name or person_name
+
+    # Handle date parameters based on whether room search is specified
+    parsed_target_date, parsed_start_date, parsed_end_date, date_mode = (
+        _handle_room_search_dates(room_search_mode, target_date, start_date, end_date)
     )
 
     # Determine which platforms are active
@@ -725,6 +1032,8 @@ def main(
         passive_participation=passive_participation,
         time_display_format=time_display_format,
         room_chunk_size=room_chunk_size,
+        max_messages=max_messages,
+        all_messages=all_messages,
     )
     github_args = _build_github_args(
         github_token=github_token,
@@ -737,8 +1046,11 @@ def main(
         safe_rate=safe_rate,
     )
 
+    # Determine if we should apply date filtering
+    should_apply_date_filter = not (room_search_mode and parsed_target_date is None)
+
     # Execute based on mode
-    if mode == "range":
+    if date_mode == "range":
         _execute_range_mode(
             parsed_start_date,
             parsed_end_date,
@@ -746,6 +1058,8 @@ def main(
             github_active,
             webex_args,
             github_args,
+            room_search_mode=room_search_mode,
+            room_search_value=room_search_value,
         )
     else:
         _execute_single_date_mode(
@@ -754,6 +1068,9 @@ def main(
             github_active,
             webex_args,
             github_args,
+            room_search_mode=room_search_mode,
+            room_search_value=room_search_value,
+            apply_date_filter=should_apply_date_filter,
         )
 
 

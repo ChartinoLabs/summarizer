@@ -22,20 +22,24 @@ class WebexConfig(BaseConfig):
         passive_participation: bool = False,
         time_display_format: Literal["12h", "24h"] = "12h",
         room_chunk_size: int = 50,
+        max_messages: int = 1000,
+        all_messages: bool = False,
     ) -> None:
         """Initialize Webex configuration.
-        
+
         Args:
             user_email: Webex user email address
             target_date: Date to analyze activity for
             webex_token: Manual access token (legacy, optional)
             oauth_client_id: OAuth application client ID (optional)
-            oauth_client_secret: OAuth application client secret (optional)  
+            oauth_client_secret: OAuth application client secret (optional)
             oauth_redirect_uri: OAuth redirect URI for authorization flow
             context_window_minutes: Window for message context
             passive_participation: Include passive participation
             time_display_format: Time format preference
             room_chunk_size: Batch size for room processing
+            max_messages: Maximum number of messages to retrieve from a room
+            all_messages: Retrieve all messages regardless of user participation
         """
         super().__init__(
             user_email=user_email,
@@ -49,6 +53,8 @@ class WebexConfig(BaseConfig):
         self.oauth_client_secret = oauth_client_secret
         self.oauth_redirect_uri = oauth_redirect_uri
         self.room_chunk_size = room_chunk_size
+        self.max_messages = max_messages
+        self.all_messages = all_messages
         
         # Initialize OAuth client if credentials provided
         self._oauth_client: WebexOAuthClient | None = None

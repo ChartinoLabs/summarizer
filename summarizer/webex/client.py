@@ -227,7 +227,11 @@ class WebexClient:
         return active_rooms
 
     def get_messages_for_rooms(
-        self, rooms: list[Room], date: datetime, local_tz: tzinfo
+        self,
+        rooms: list[Room],
+        date: datetime,
+        local_tz: tzinfo,
+        all_messages_flag: bool = False,
     ) -> list[Message]:
         """Get all messages for the given rooms and date."""
         messages: list[Message] = []
@@ -252,6 +256,7 @@ class WebexClient:
                         self.config.user_email,
                         room,
                         local_tz,
+                        all_messages_flag,
                     ): room
                     for room in rooms
                 }
@@ -285,18 +290,233 @@ class WebexClient:
         messages.sort(key=lambda x: x.timestamp)
         return messages
 
+    def find_room_by_id(self, room_id: str) -> Room | None:
+        """Find a room by exact room ID match.
+
+        Args:
+            room_id: The exact room ID to find
+
+        Returns:
+            Room object if found, None otherwise
+        """
+        try:
+            return self._client.rooms.get(roomId=room_id)
+        except ApiError as e:
+            if "404" in str(e):
+                logger.info("Room with ID %s not found", room_id)
+                return None
+            else:
+                raise
+
+    def find_room_by_name(self, room_name: str) -> Room | None:
+        """Find a room by exact room name match.
+
+        Args:
+            room_name: The exact room name to find
+
+        Returns:
+            Room object if found, None otherwise
+        """
+        rooms = self._client.rooms.list(max=1000)  # Get more rooms for searching
+        for room in rooms:
+            if room.title == room_name:
+                logger.info("Found room '%s' with ID %s", room_name, room.id)
+                return room
+        logger.info("No room found with exact name '%s'", room_name)
+        return None
+
+    def find_dm_room_by_person_name(self, person_name: str) -> Room | None:
+        """Find a direct message room with a specific person by exact name match.
+
+        Args:
+            person_name: The exact display name of the person to find DM with
+
+        Returns:
+            Room object if found, None otherwise
+        """
+        # Get all rooms and filter for direct message rooms
+        all_rooms = self._client.rooms.list(max=1000)
+        dm_rooms = [room for room in all_rooms if room.type == "direct"]
+
+        for room in dm_rooms:
+            try:
+                # Get memberships to find the other person in the DM
+                memberships = self._client.memberships.list(roomId=room.id)
+                me = self.get_me()
+
+                for membership in memberships:
+                    if membership.personId != me.id:
+                        # This is the other person in the DM
+                        other_person = safe_get_person(
+                            self._client, membership.personId
+                        )
+                        if other_person.display_name == person_name:
+                            logger.info(
+                                "Found DM room with %s (ID: %s, Room ID: %s)",
+                                person_name,
+                                membership.personId,
+                                room.id,
+                            )
+                            return room
+            except ApiError as e:
+                logger.warning("Error checking memberships for room %s: %s", room.id, e)
+                continue
+
+        logger.info("No DM room found with person named '%s'", person_name)
+        return None
+
+    def get_all_messages_from_room(
+        self, room: Room, max_messages: int = 1000, local_tz: tzinfo | None = None
+    ) -> list[Message]:
+        """Get all messages from a specific room up to max_messages limit.
+
+        Args:
+            room: The room to retrieve messages from
+            max_messages: Maximum number of messages to retrieve
+            local_tz: Local timezone for timestamp conversion
+
+        Returns:
+            List of Message objects sorted chronologically
+        """
+        if local_tz is None:
+            local_tz = UTC
+
+        messages: list[Message] = []
+        sdk_messages = self._client.messages.list(roomId=room.id, max=max_messages)
+
+        logger.info(
+            "Retrieving up to %d messages from room '%s'", max_messages, room.title
+        )
+
+        with Progress(
+            SpinnerColumn(),
+            TextColumn(f"[bold blue]Fetching messages from {room.title}..."),
+            TextColumn("[green]Retrieved: {task.completed}"),
+            BarColumn(),
+            console=console,
+        ) as progress:
+            task = progress.add_task("Fetching messages...", total=None)
+
+            for sdk_message in sdk_messages:
+                if len(messages) >= max_messages:
+                    break
+
+                if sdk_message.created is None:
+                    logger.warning(
+                        "Message %s has no creation date, skipping...", sdk_message.id
+                    )
+                    continue
+
+                msg = create_message(sdk_message, self._client, room, local_tz)
+                messages.append(msg)
+                progress.update(task, advance=1)
+
+        logger.info("Retrieved %d messages from room '%s'", len(messages), room.title)
+        # Sort chronologically (oldest first)
+        messages.sort(key=lambda x: x.timestamp)
+        return messages
+
     def get_activity(
-        self, date: datetime, local_tz: tzinfo, room_chunk_size: int = 50
+        self,
+        date: datetime,
+        local_tz: tzinfo,
+        room_chunk_size: int = 50,
+        all_messages_flag: bool = False,
     ) -> list[Message]:
         """Get all activity for the specified date as a list of Message objects."""
         active_rooms = self.get_rooms_active_since_date(date)
         logger.info(
             "A total of %d active rooms were found on date %s", len(active_rooms), date
         )
-        messages = self.get_messages_for_rooms(active_rooms, date, local_tz)
+        messages = self.get_messages_for_rooms(
+            active_rooms, date, local_tz, all_messages_flag
+        )
         logger.info("A total of %d messages were found on date %s", len(messages), date)
         messages.sort(key=lambda x: x.timestamp)
         return messages
+
+    def add_users_to_room(
+        self, room_id: str, user_emails: list[str]
+    ) -> tuple[list[str], list[tuple[str, str]]]:
+        """Add multiple users to a Webex room.
+
+        This method iterates through a list of user email addresses and attempts to
+        add each user to the specified room via the Webex memberships API. Users who
+        are already members are counted as successful additions. All API errors are
+        caught and reported.
+
+        Args:
+            room_id: The unique identifier of the room to add users to
+            user_emails: List of email addresses to add to the room
+
+        Returns:
+            A tuple containing:
+                - List of successfully added email addresses
+                - List of tuples (email, error_message) for failed additions
+
+        Raises:
+            ApiError: Only if the room itself cannot be found or accessed
+        """
+        successful: list[str] = []
+        failed: list[tuple[str, str]] = []
+
+        # Verify room exists first
+        try:
+            room = self._client.rooms.get(roomId=room_id)
+            logger.info("Adding users to room '%s' (ID: %s)", room.title, room_id)
+        except ApiError as e:
+            if "404" in str(e):
+                logger.error("Room with ID %s not found", room_id)
+                raise
+            else:
+                logger.error("Error accessing room %s: %s", room_id, e)
+                raise
+
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[bold blue]Adding users to room..."),
+            TextColumn("[green]Processed: {task.completed}/{task.total}"),
+            BarColumn(),
+            console=console,
+        ) as progress:
+            task = progress.add_task("Adding users...", total=len(user_emails))
+
+            for email in user_emails:
+                try:
+                    # Attempt to add user to room
+                    self._client.memberships.create(roomId=room_id, personEmail=email)
+                    logger.debug("Successfully added %s to room %s", email, room_id)
+                    successful.append(email)
+                except ApiError as e:
+                    error_msg = str(e)
+                    # If user is already a member, count as success
+                    if "409" in error_msg or "already" in error_msg.lower():
+                        logger.debug(
+                            "User %s is already a member of room %s", email, room_id
+                        )
+                        successful.append(email)
+                    else:
+                        # Log and track other errors
+                        logger.warning(
+                            "Failed to add %s to room %s: %s", email, room_id, e
+                        )
+                        failed.append((email, error_msg))
+                except Exception as e:
+                    # Catch any non-API errors
+                    error_msg = f"Unexpected error: {e}"
+                    logger.error(
+                        "Unexpected error adding %s to room %s: %s", email, room_id, e
+                    )
+                    failed.append((email, error_msg))
+
+                progress.update(task, advance=1)
+
+        logger.info(
+            "User addition complete: %d successful, %d failed",
+            len(successful),
+            len(failed),
+        )
+        return successful, failed
 
 
 def parse_message_time(sdk_message: SDKMessage, local_tz: tzinfo) -> datetime:
@@ -331,9 +551,10 @@ def build_analysis_result(
     last_activity: datetime | None,
     had_activity_on_or_after_date: bool,
     user_sent: bool,
+    all_messages_flag: bool = False,
 ) -> MessageAnalysisResult:
     """Build the MessageAnalysisResult based on whether the user sent a message."""
-    if user_sent:
+    if user_sent or all_messages_flag:
         return MessageAnalysisResult(
             room=room,
             messages=all_messages,
@@ -350,12 +571,17 @@ def build_analysis_result(
 
 
 def get_messages(
-    client: WebexAPI, date: datetime, user_email: str, room: Room, local_tz: tzinfo
+    client: WebexAPI,
+    date: datetime,
+    user_email: str,
+    room: Room,
+    local_tz: tzinfo,
+    all_messages_flag: bool = False,
 ) -> MessageAnalysisResult:
     """Get all messages for a specific date in a room.
 
     Only returns messages if the user sent at least one message in that room on that
-    date.
+    date, unless all_messages_flag is True which returns all messages regardless.
     """
     all_messages: list[Message] = []
     user_sent = False
@@ -411,4 +637,5 @@ def get_messages(
         last_activity,
         had_activity_on_or_after_date,
         user_sent,
+        all_messages_flag,
     )

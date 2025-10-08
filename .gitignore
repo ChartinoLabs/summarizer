@@ -186,3 +186,10 @@ Temporary Items
 
 # Project-specific
 baseline_output_*.txt
+
+# Claude and editor configuration files
+CLAUDE.md
+.cursorrules
+
+# Ruff cache
+.ruff_cache

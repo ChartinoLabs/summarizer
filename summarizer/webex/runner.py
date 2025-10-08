@@ -54,12 +54,101 @@ class WebexRunner(BaseRunner):
         console.log(f"Connected as [bold green]{me.display_name}[/]")
         logger.info("Successfully connected to Webex API as %s", me.display_name)
 
-    def get_activity(self, date: datetime, local_tz: tzinfo) -> list[Message]:
+    def get_activity(
+        self, date: datetime, local_tz: tzinfo, all_messages: bool = False
+    ) -> list[Message]:
         """Get all activity for the specified date as a list of Message objects."""
         if not self.client:
             raise RuntimeError("Must call connect() before get_activity()")
 
-        return self.client.get_activity(date, local_tz, self.config.room_chunk_size)
+        return self.client.get_activity(
+            date, local_tz, self.config.room_chunk_size, all_messages
+        )
+
+    def get_room_messages(
+        self,
+        room_search_mode: str,
+        room_search_value: str,
+        local_tz: tzinfo,
+        apply_date_filter: bool = True,
+    ) -> list[Message] | None:
+        """Get messages from a specific room.
+
+        Args:
+            room_search_mode: Type of room search (room_id, room_name, person_name)
+            room_search_value: Value to search for
+            local_tz: Local timezone
+            apply_date_filter: Whether to filter messages by target date
+
+        Returns:
+            List of messages or None if room not found
+        """
+        if not self.client:
+            raise RuntimeError("Must call connect() before get_room_messages()")
+
+        # Find the room
+        room = self._find_room_by_search_mode(room_search_mode, room_search_value)
+
+        if room is None:
+            console.print(f"[red]Could not find room/person: {room_search_value}[/]")
+            self._display_room_not_found_help(room_search_mode)
+            return None
+
+        console.print(f"Found room: [bold green]{room.title}[/] (ID: {room.id})")
+
+        # Get all messages from the room
+        message_data = self.client.get_all_messages_from_room(
+            room, self.config.max_messages, local_tz
+        )
+
+        # Apply date filtering if specified
+        if apply_date_filter and self.config.target_date:
+            original_count = len(message_data)
+            message_data = [
+                msg
+                for msg in message_data
+                if msg.timestamp.date() == self.config.target_date.date()
+            ]
+            console.print(
+                f"Filtered to [bold]{len(message_data)}[/] messages from "
+                f"[bold]{self.config.target_date.date()}[/] (out of {original_count} total)"
+            )
+        return message_data
+
+    def _find_room_by_search_mode(
+        self, room_search_mode: str, room_search_value: str
+    ) -> object | None:
+        """Find a room based on search mode and value."""
+        if not self.client:
+            raise RuntimeError("Must call connect() before _find_room_by_search_mode()")
+
+        if room_search_mode == "room_id":
+            console.print(f"Looking for room with ID [bold]{room_search_value}[/]...")
+            return self.client.find_room_by_id(room_search_value)
+        elif room_search_mode == "room_name":
+            console.print(f"Looking for room named [bold]{room_search_value}[/]...")
+            return self.client.find_room_by_name(room_search_value)
+        elif room_search_mode == "person_name":
+            console.print(f"Looking for DM with [bold]{room_search_value}[/]...")
+            return self.client.find_dm_room_by_person_name(room_search_value)
+        return None
+
+    def _display_room_not_found_help(self, room_search_mode: str) -> None:
+        """Display helpful error messages when room is not found."""
+        if room_search_mode == "room_id":
+            console.print(
+                "[yellow]Please verify the room ID is correct and you have access to it.[/]"
+            )
+        elif room_search_mode == "room_name":
+            console.print(
+                "[yellow]Please verify the room name is exactly "
+                "correct (case-sensitive).[/]"
+            )
+        elif room_search_mode == "person_name":
+            console.print(
+                "[yellow]Please verify the person's name is exactly "
+                "correct and you have a DM with them.[/]"
+            )
 
     def get_user_id(self) -> str:
         """Get the authenticated user's ID."""
@@ -84,4 +173,69 @@ class WebexRunner(BaseRunner):
             user_id,
             include_passive=self.config.passive_participation,
             client=self.client.client,  # Pass the underlying WebexAPI client
+            all_messages=self.config.all_messages,
+        )
+
+    def run(
+        self,
+        date_header: bool = False,
+        room_search_mode: str | None = None,
+        room_search_value: str | None = None,
+        apply_date_filter: bool = True,
+    ) -> None:
+        """Run the Webex application with optional room search support."""
+        local_tz = datetime.now().astimezone().tzinfo
+        if local_tz is None:
+            console.print(
+                "[yellow]Unable to identify local timezone. Defaulting to UTC.[/]"
+            )
+            from datetime import UTC
+
+            local_tz = UTC
+
+        logger.info("Local timezone is %s", local_tz)
+
+        if date_header and self.config.target_date:
+            from summarizer.common.console_ui import print_date_header
+
+            print_date_header(self.config.target_date)
+
+        with console.status("[bold green]Connecting to APIs...[/]"):
+            self.connect()
+
+        # Get message data based on search mode
+        if room_search_mode and room_search_value:
+            # Room-specific workflow
+            message_data = self.get_room_messages(
+                room_search_mode,
+                room_search_value,
+                local_tz,
+                apply_date_filter,
+            )
+            if message_data is None:
+                return
+        else:
+            # Traditional date-based workflow
+            if self.config.target_date is None:
+                raise ValueError(
+                    "Target date is required for traditional date-based workflow"
+                )
+            console.print(
+                f"Looking for activity on [bold]{self.config.target_date.date()}[/]..."
+            )
+            message_data = self.get_activity(
+                self.config.target_date, local_tz, self.config.all_messages
+            )
+
+        # Conversation grouping integration
+        context_window = timedelta(minutes=self.config.context_window_minutes)
+        user_id = self.get_user_id()
+        conversations = self._group_conversations(message_data, context_window, user_id)
+
+        # Display results
+        display_conversations(
+            conversations, time_display_format=self.config.time_display_format
+        )
+        display_conversations_summary(
+            conversations, time_display_format=self.config.time_display_format
         )
