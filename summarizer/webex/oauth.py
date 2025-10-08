@@ -225,7 +225,7 @@ class WebexOAuthClient:
 
     # Webex OAuth endpoints
     AUTHORIZE_URL = "https://webexapis.com/v1/authorize"
-    TOKEN_URL = "https://webexapis.com/v1/access_token"
+    TOKEN_URL = "https://webexapis.com/v1/access_token"  # nosec B105
 
     def __init__(self, app_config: WebexOAuthApp) -> None:
         """Initialize OAuth client with app configuration."""
@@ -471,15 +471,11 @@ class WebexOAuthClient:
             auth_url, code_verifier = self.get_authorization_url()
 
             console.print("\n🔐 Starting Webex OAuth authentication...")
-            console.print(
-                f"📡 Temporary callback server started at: {callback_url}"
-            )
+            console.print(f"📡 Temporary callback server started at: {callback_url}")
             console.print("🌐 Opening browser for authorization...")
             console.print("\nIf the browser doesn't open automatically, visit:")
             console.print(f"{auth_url}")
-            console.print(
-                "\n⏳ Waiting for authorization (timeout: 5 minutes)..."
-            )
+            console.print("\n⏳ Waiting for authorization (timeout: 5 minutes)...")
 
             # Open browser
             webbrowser.open(auth_url)
