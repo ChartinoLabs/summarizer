@@ -170,7 +170,11 @@ class WebexClient:
         return active_rooms
 
     def get_messages_for_rooms(
-        self, rooms: list[Room], date: datetime, local_tz: tzinfo
+        self,
+        rooms: list[Room],
+        date: datetime,
+        local_tz: tzinfo,
+        all_messages_flag: bool = False,
     ) -> list[Message]:
         """Get all messages for the given rooms and date."""
         messages: list[Message] = []
@@ -195,6 +199,7 @@ class WebexClient:
                         self.config.user_email,
                         room,
                         local_tz,
+                        all_messages_flag,
                     ): room
                     for room in rooms
                 }
@@ -355,17 +360,106 @@ class WebexClient:
         return messages
 
     def get_activity(
-        self, date: datetime, local_tz: tzinfo, room_chunk_size: int = 50
+        self,
+        date: datetime,
+        local_tz: tzinfo,
+        room_chunk_size: int = 50,
+        all_messages_flag: bool = False,
     ) -> list[Message]:
         """Get all activity for the specified date as a list of Message objects."""
         active_rooms = self.get_rooms_active_since_date(date)
         logger.info(
             "A total of %d active rooms were found on date %s", len(active_rooms), date
         )
-        messages = self.get_messages_for_rooms(active_rooms, date, local_tz)
+        messages = self.get_messages_for_rooms(
+            active_rooms, date, local_tz, all_messages_flag
+        )
         logger.info("A total of %d messages were found on date %s", len(messages), date)
         messages.sort(key=lambda x: x.timestamp)
         return messages
+
+    def add_users_to_room(
+        self, room_id: str, user_emails: list[str]
+    ) -> tuple[list[str], list[tuple[str, str]]]:
+        """Add multiple users to a Webex room.
+
+        This method iterates through a list of user email addresses and attempts to
+        add each user to the specified room via the Webex memberships API. Users who
+        are already members are counted as successful additions. All API errors are
+        caught and reported.
+
+        Args:
+            room_id: The unique identifier of the room to add users to
+            user_emails: List of email addresses to add to the room
+
+        Returns:
+            A tuple containing:
+                - List of successfully added email addresses
+                - List of tuples (email, error_message) for failed additions
+
+        Raises:
+            ApiError: Only if the room itself cannot be found or accessed
+        """
+        successful: list[str] = []
+        failed: list[tuple[str, str]] = []
+
+        # Verify room exists first
+        try:
+            room = self._client.rooms.get(roomId=room_id)
+            logger.info("Adding users to room '%s' (ID: %s)", room.title, room_id)
+        except ApiError as e:
+            if "404" in str(e):
+                logger.error("Room with ID %s not found", room_id)
+                raise
+            else:
+                logger.error("Error accessing room %s: %s", room_id, e)
+                raise
+
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[bold blue]Adding users to room..."),
+            TextColumn("[green]Processed: {task.completed}/{task.total}"),
+            BarColumn(),
+            console=console,
+        ) as progress:
+            task = progress.add_task("Adding users...", total=len(user_emails))
+
+            for email in user_emails:
+                try:
+                    # Attempt to add user to room
+                    self._client.memberships.create(roomId=room_id, personEmail=email)
+                    logger.debug("Successfully added %s to room %s", email, room_id)
+                    successful.append(email)
+                except ApiError as e:
+                    error_msg = str(e)
+                    # If user is already a member, count as success
+                    if "409" in error_msg or "already" in error_msg.lower():
+                        logger.debug(
+                            "User %s is already a member of room %s", email, room_id
+                        )
+                        successful.append(email)
+                    else:
+                        # Log and track other errors
+                        logger.warning(
+                            "Failed to add %s to room %s: %s", email, room_id, e
+                        )
+                        failed.append((email, error_msg))
+                except Exception as e:
+                    # Catch any non-API errors
+                    error_msg = f"Unexpected error: {e}"
+                    logger.error(
+                        "Unexpected error adding %s to room %s: %s", email, room_id, e
+                    )
+                    failed.append((email, error_msg))
+
+                progress.update(task, advance=1)
+
+        logger.info(
+            "User addition complete: %d successful, %d failed",
+            len(successful),
+            len(failed),
+        )
+        return successful, failed
 
 
 def parse_message_time(sdk_message: SDKMessage, local_tz: tzinfo) -> datetime:
@@ -400,9 +494,10 @@ def build_analysis_result(
     last_activity: datetime | None,
     had_activity_on_or_after_date: bool,
     user_sent: bool,
+    all_messages_flag: bool = False,
 ) -> MessageAnalysisResult:
     """Build the MessageAnalysisResult based on whether the user sent a message."""
-    if user_sent:
+    if user_sent or all_messages_flag:
         return MessageAnalysisResult(
             room=room,
             messages=all_messages,
@@ -419,12 +514,17 @@ def build_analysis_result(
 
 
 def get_messages(
-    client: WebexAPI, date: datetime, user_email: str, room: Room, local_tz: tzinfo
+    client: WebexAPI,
+    date: datetime,
+    user_email: str,
+    room: Room,
+    local_tz: tzinfo,
+    all_messages_flag: bool = False,
 ) -> MessageAnalysisResult:
     """Get all messages for a specific date in a room.
 
     Only returns messages if the user sent at least one message in that room on that
-    date.
+    date, unless all_messages_flag is True which returns all messages regardless.
     """
     all_messages: list[Message] = []
     user_sent = False
@@ -480,4 +580,5 @@ def get_messages(
         last_activity,
         had_activity_on_or_after_date,
         user_sent,
+        all_messages_flag,
     )

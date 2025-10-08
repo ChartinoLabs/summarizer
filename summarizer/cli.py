@@ -3,14 +3,18 @@
 import logging
 from datetime import datetime, timedelta
 from enum import Enum
+from pathlib import Path
 from typing import Annotated
 
 import typer
 from dotenv import load_dotenv
 
 from summarizer.config import AppConfig
+from summarizer.console_ui import console
 from summarizer.logging import setup_logging
 from summarizer.runner import run_app
+from summarizer.webex import WebexClient
+from summarizer.yaml_utils import load_users_from_yaml
 
 # Load environment variables from .env before initializing the Typer app
 load_dotenv()
@@ -188,6 +192,7 @@ def _run_date_range(
     max_messages: int,
     room_search_mode: str | None,
     room_search_value: str | None,
+    all_messages: bool,
 ) -> None:
     """Execute date range workflow."""
     current = parsed_start_date
@@ -201,6 +206,7 @@ def _run_date_range(
             time_display_format=time_display_format,
             room_chunk_size=room_chunk_size,
             max_messages=max_messages,
+            all_messages=all_messages,
         )
         _run_for_date(
             config,
@@ -321,6 +327,12 @@ def main(
     max_messages: Annotated[
         int, typer.Option(help="Maximum number of messages to retrieve from room")
     ] = 1000,
+    all_messages: Annotated[
+        bool,
+        typer.Option(
+            help="Retrieve ALL messages from room regardless of user participation"
+        ),
+    ] = False,
 ) -> None:
     """Webex Summarizer CLI (Typer config parsing demo)."""
     if debug is True:
@@ -354,6 +366,7 @@ def main(
             max_messages,
             room_search_mode,
             room_search_value,
+            all_messages,
         )
         return
 
@@ -371,6 +384,7 @@ def main(
         time_display_format=time_display_format.value,
         room_chunk_size=room_chunk_size,
         max_messages=max_messages,
+        all_messages=all_messages,
     )
 
     # Determine if we should apply date filtering
@@ -383,6 +397,129 @@ def main(
         room_search_value=room_search_value,
         apply_date_filter=should_apply_date_filter,
     )
+
+
+@app.command()
+def add_users(
+    webex_token: Annotated[
+        str,
+        typer.Option(
+            ...,
+            envvar="WEBEX_TOKEN",
+            prompt=(
+                "Enter your Webex access token "
+                "(https://developer.webex.com/docs/getting-started)"
+            ),
+            hide_input=True,
+        ),
+    ],
+    room_id: Annotated[
+        str,
+        typer.Option(..., help="Room ID to add users to"),
+    ],
+    users_file: Annotated[
+        Path,
+        typer.Option(..., help="Path to YAML file containing user list"),
+    ],
+    debug: Annotated[bool, typer.Option(help="Enable debug logging")] = False,
+) -> None:
+    """Add users from a YAML file to a Webex room.
+
+    This command reads a YAML file containing team member information (with cec_id
+    fields) and adds each user to the specified Webex room. Users are added with
+    email addresses in the format {cec_id}@cisco.com.
+
+    The YAML file should follow the team structure with a 'members' list where each
+    member has a 'cec_id' field.
+
+    Example YAML structure:
+        name: team-name
+        members:
+          - username: jsmith
+            cec_id: jsmith
+            full_name: John Smith
+
+    Users who are already members of the room are counted as successful additions.
+    A report of failed additions (if any) will be written to failed_additions.yaml.
+    """
+    if debug is True:
+        logger.setLevel(logging.DEBUG)
+        logger.debug("Debug logging enabled")
+
+    # Load user emails from YAML file
+    try:
+        user_emails = load_users_from_yaml(users_file)
+    except (FileNotFoundError, ValueError, Exception) as e:
+        console.print(f"[red]Error loading users from YAML file: {e}[/red]")
+        raise typer.Exit(1) from e
+
+    if not user_emails:
+        console.print("[yellow]No users found in YAML file. Exiting.[/yellow]")
+        raise typer.Exit(0)
+
+    console.print(f"[blue]Loaded {len(user_emails)} users from {users_file}[/blue]")
+
+    # Initialize Webex client
+    config = AppConfig(
+        webex_token=webex_token,
+        user_email="",  # Not needed for this operation
+        target_date=None,
+        context_window_minutes=0,
+        passive_participation=False,
+        time_display_format="12h",
+        room_chunk_size=50,
+        max_messages=1000,
+        all_messages=False,
+    )
+    client = WebexClient(config)
+
+    # Add users to room
+    try:
+        successful, failed = client.add_users_to_room(room_id, user_emails)
+    except Exception as e:
+        console.print(f"[red]Error adding users to room: {e}[/red]")
+        raise typer.Exit(1) from e
+
+    # Display results
+    console.print(
+        f"\n[bold green]Successfully added {len(successful)} users "
+        f"to the room[/bold green]"
+    )
+
+    if failed:
+        console.print(f"[bold yellow]Failed to add {len(failed)} users[/bold yellow]")
+
+        # Write failed additions to a report file
+        failed_report_path = Path("failed_additions.yaml")
+        try:
+            import yaml
+
+            failed_data = {
+                "room_id": room_id,
+                "timestamp": datetime.now().isoformat(),
+                "failed_users": [
+                    {"email": email, "error": error} for email, error in failed
+                ],
+            }
+
+            with failed_report_path.open("w") as f:
+                yaml.dump(failed_data, f, default_flow_style=False)
+
+            console.print(
+                f"[yellow]Failed additions written to {failed_report_path}[/yellow]"
+            )
+        except Exception as e:
+            logger.error("Failed to write error report: %s", e)
+            console.print(
+                f"[red]Warning: Could not write failed additions report: {e}[/red]"
+            )
+
+        # Also print failed users to console for immediate visibility
+        console.print("\n[yellow]Failed additions:[/yellow]")
+        for email, error in failed:
+            console.print(f"  - {email}: {error}")
+    else:
+        console.print("[bold green]All users added successfully![/bold green]")
 
 
 if __name__ == "__main__":

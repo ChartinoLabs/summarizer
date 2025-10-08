@@ -164,3 +164,10 @@ cython_debug/
 
 # Application logs
 logs/
+
+# Claude and editor configuration files
+CLAUDE.md
+.cursorrules
+
+# Ruff cache
+.ruff_cache

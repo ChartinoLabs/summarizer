@@ -190,7 +190,7 @@ def run_app(
             f"Looking for activity on [bold]{config.target_date.date()}[/]..."
         )
         message_data = webex_client.get_activity(
-            config.target_date, local_tz, config.room_chunk_size
+            config.target_date, local_tz, config.room_chunk_size, config.all_messages
         )
 
     # Conversation grouping integration
@@ -202,6 +202,7 @@ def run_app(
         user_id,
         include_passive=config.passive_participation,
         client=webex_client.client,
+        all_messages=config.all_messages,
     )
 
     # Improved conversation reporting
