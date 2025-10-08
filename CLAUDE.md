@@ -13,7 +13,7 @@ This is a Python CLI application that summarizes work activity across multiple p
 # Install dependencies
 uv sync
 
-# Install with development dependencies  
+# Install with development dependencies
 uv sync --all-extras
 ```
 
@@ -113,7 +113,7 @@ uv run pre-commit run --all-files
 
 #### Configuration System
 - `BaseConfig`: Abstract base for platform-agnostic configuration
-- `WebexConfig`: Webex-specific settings (OAuth/manual tokens, email, context windows)  
+- `WebexConfig`: Webex-specific settings (OAuth/manual tokens, email, context windows)
 - `GithubConfig`: GitHub-specific settings (tokens, API URLs, org/repo filters)
 
 #### Authentication System
@@ -150,7 +150,7 @@ Each platform follows the same pattern:
 
 ### Dependencies
 - **Core**: `typer`, `pydantic-settings`, `requests`, `rich`
-- **Webex**: `webexpythonsdk` 
+- **Webex**: `webexpythonsdk`
 - **Dev**: `ruff`, `pytest`, `bandit`, `xenon`, `pre-commit`
 
 ### Code Standards
