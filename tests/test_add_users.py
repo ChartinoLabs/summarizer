@@ -7,8 +7,7 @@ import requests
 from webexpythonsdk.exceptions import ApiError
 from webexpythonsdk.models.immutable import Room
 
-from summarizer.config import AppConfig
-from summarizer.webex import WebexClient
+from summarizer.webex import WebexClient, WebexConfig
 
 
 def create_mock_api_error(status_code: int, message: str) -> ApiError:
@@ -40,12 +39,14 @@ class TestAddUsersToRoom:
     """Tests for WebexClient.add_users_to_room method."""
 
     @pytest.fixture
-    def config(self) -> AppConfig:
+    def config(self) -> WebexConfig:
         """Create a test configuration."""
-        return AppConfig(
+        from datetime import datetime
+
+        return WebexConfig(
             webex_token="test_token",
             user_email="test@cisco.com",
-            target_date=None,
+            target_date=datetime(2024, 1, 1),
             context_window_minutes=15,
             passive_participation=False,
             time_display_format="12h",
@@ -60,7 +61,7 @@ class TestAddUsersToRoom:
         return MagicMock()
 
     @pytest.fixture
-    def client(self, config: AppConfig, mock_webex_api: MagicMock) -> WebexClient:
+    def client(self, config: WebexConfig, mock_webex_api: MagicMock) -> WebexClient:
         """Create a WebexClient with mocked API."""
         return WebexClient(config, client=mock_webex_api)
 
