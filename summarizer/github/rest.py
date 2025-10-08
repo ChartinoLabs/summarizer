@@ -169,7 +169,7 @@ class RESTClient:
 
         return results
 
-    def fetch_detailed_commits(
+    def fetch_detailed_commits(  # noqa: C901
         self,
         repos: set[str],
         start: datetime,

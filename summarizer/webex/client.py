@@ -103,7 +103,8 @@ class WebexClient:
             access_token = config.get_access_token()
             if not access_token:
                 raise ValueError(
-                    "No valid Webex access token available. Please authenticate with OAuth or provide a manual token."
+                    "No valid Webex access token available. "
+                    "Please authenticate with OAuth or provide a manual token."
                 )
 
             logger.debug(
@@ -154,24 +155,32 @@ class WebexClient:
                                 logger.debug(f"Token refresh failed: {refresh_error}")
 
                         raise ValueError(
-                            "Webex API access forbidden (403). This usually means:\n"
+                            "Webex API access forbidden (403). "
+                            "This usually means:\n"
                             "1. Your OAuth token has expired or is invalid\n"
-                            "2. Your token is missing required scopes (spark:messages_read, spark:rooms_read)\n"
-                            "3. Your Webex account doesn't have the necessary permissions\n\n"
+                            "2. Your token is missing required scopes "
+                            "(spark:messages_read, spark:rooms_read)\n"
+                            "3. Your Webex account doesn't have the necessary "
+                            "permissions\n\n"
                             "Try re-authenticating with: summarizer webex login"
                         ) from e
                     else:
                         raise ValueError(
-                            "Webex API access forbidden (403). This usually means:\n"
-                            "1. Your access token has expired (manual tokens expire every 12 hours)\n"
+                            "Webex API access forbidden (403). "
+                            "This usually means:\n"
+                            "1. Your access token has expired "
+                            "(manual tokens expire every 12 hours)\n"
                             "2. Your token is missing required scopes\n"
-                            "3. Your Webex account doesn't have the necessary permissions\n\n"
-                            "Get a new token from: https://developer.webex.com/docs/getting-started\n"
+                            "3. Your Webex account doesn't have the necessary "
+                            "permissions\n\n"
+                            "Get a new token from: "
+                            "https://developer.webex.com/docs/getting-started\n"
                             "Or consider switching to OAuth authentication."
                         ) from e
                 elif e.response.status_code == 401:
                     raise ValueError(
-                        "Webex API authentication failed (401). Your access token is invalid.\n"
+                        "Webex API authentication failed (401). "
+                        "Your access token is invalid.\n"
                         "Please check your token and try again."
                     ) from e
                 else:

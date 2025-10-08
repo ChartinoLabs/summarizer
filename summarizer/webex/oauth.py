@@ -20,19 +20,21 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 import requests
+from rich.console import Console
 
 logger = logging.getLogger(__name__)
+console = Console()
 
 
 class OAuthCallbackHandler(BaseHTTPRequestHandler):
     """HTTP request handler for OAuth callback."""
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:  # noqa: ANN401
         """Initialize handler with authorization code storage."""
         self.server_instance = None
         super().__init__(*args, **kwargs)
 
-    def do_GET(self) -> None:
+    def do_GET(self) -> None:  # noqa: N802
         """Handle GET request for OAuth callback."""
         url_parts = urlparse(self.path)
         query_params = parse_qs(url_parts.query)
@@ -65,7 +67,8 @@ class OAuthCallbackHandler(BaseHTTPRequestHandler):
             <!DOCTYPE html>
             <html>
             <head><title>Authorization Successful</title></head>
-            <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
+            <body style="font-family: Arial, sans-serif; text-align: center;
+                         padding: 50px;">
                 <h1 style="color: green;">✅ Authorization Successful!</h1>
                 <p>You have successfully authorized the Webex integration.</p>
                 <p>You can now close this browser window and return to the terminal.</p>
@@ -78,7 +81,8 @@ class OAuthCallbackHandler(BaseHTTPRequestHandler):
             <!DOCTYPE html>
             <html>
             <head><title>Authorization Failed</title></head>
-            <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
+            <body style="font-family: Arial, sans-serif; text-align: center;
+                         padding: 50px;">
                 <h1 style="color: red;">❌ Authorization Failed</h1>
                 <p>Error: {error}</p>
                 <p>Description: {error_description if error else "Unknown error"}</p>
@@ -92,7 +96,7 @@ class OAuthCallbackHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(response_html.encode("utf-8"))
 
-    def log_message(self, format: str, *args) -> None:
+    def log_message(self, format: str, *args: Any) -> None:  # noqa: ANN401
         """Suppress default HTTP server logging."""
         pass
 
@@ -100,7 +104,7 @@ class OAuthCallbackHandler(BaseHTTPRequestHandler):
 class OAuthCallbackServer:
     """Temporary HTTP server for handling OAuth callbacks."""
 
-    def __init__(self, host: str = "localhost", port: int = 8080):
+    def __init__(self, host: str = "localhost", port: int = 8080) -> None:
         """Initialize callback server."""
         self.host = host
         self.port = port
@@ -351,7 +355,8 @@ class WebexOAuthClient:
         expires_in = token_data.get("expires_in", 14 * 24 * 3600)  # Default 14 days
         expires_at = datetime.now(UTC) + timedelta(seconds=expires_in)
 
-        # Keep existing refresh token if not provided (some providers don't return new one)
+        # Keep existing refresh token if not provided
+        # (some providers don't return new one)
         new_refresh_token = token_data.get("refresh_token", credentials.refresh_token)
 
         new_credentials = WebexOAuthCredentials(
@@ -411,7 +416,8 @@ class WebexOAuthClient:
             return None
 
         logger.debug(
-            f"Loaded credentials - expires: {credentials.expires_at}, scopes: {credentials.scope}"
+            f"Loaded credentials - expires: {credentials.expires_at}, "
+            f"scopes: {credentials.scope}"
         )
 
         # Check if token is expired and needs refresh
@@ -464,12 +470,16 @@ class WebexOAuthClient:
             # Generate authorization URL with dynamic callback
             auth_url, code_verifier = self.get_authorization_url()
 
-            print("\n🔐 Starting Webex OAuth authentication...")
-            print(f"📡 Temporary callback server started at: {callback_url}")
-            print("🌐 Opening browser for authorization...")
-            print("\nIf the browser doesn't open automatically, visit:")
-            print(f"{auth_url}")
-            print("\n⏳ Waiting for authorization (timeout: 5 minutes)...")
+            console.print("\n🔐 Starting Webex OAuth authentication...")
+            console.print(
+                f"📡 Temporary callback server started at: {callback_url}"
+            )
+            console.print("🌐 Opening browser for authorization...")
+            console.print("\nIf the browser doesn't open automatically, visit:")
+            console.print(f"{auth_url}")
+            console.print(
+                "\n⏳ Waiting for authorization (timeout: 5 minutes)..."
+            )
 
             # Open browser
             webbrowser.open(auth_url)
@@ -480,7 +490,8 @@ class WebexOAuthClient:
 
                 if "error" in result:
                     raise RuntimeError(
-                        f"Authorization failed: {result['error']} - {result.get('description', '')}"
+                        f"Authorization failed: {result['error']} - "
+                        f"{result.get('description', '')}"
                     )
 
                 if "code" not in result:
@@ -490,20 +501,20 @@ class WebexOAuthClient:
                 credentials = self.exchange_code_for_tokens(
                     result["code"], code_verifier
                 )
-                print("✅ Successfully authenticated with Webex!")
-                print(f"🔑 Access token expires: {credentials.expires_at}")
-                print("💾 Credentials saved securely")
+                console.print("✅ Successfully authenticated with Webex!")
+                console.print(f"🔑 Access token expires: {credentials.expires_at}")
+                console.print("💾 Credentials saved securely")
                 return credentials
 
-            except TimeoutError:
+            except TimeoutError as e:
                 raise RuntimeError(
                     "Authentication timeout - please try again. "
                     "Make sure to complete the authorization within 5 minutes."
-                )
+                ) from e
 
         except Exception as e:
             callback_server.stop()
-            raise RuntimeError(f"Authentication failed: {e}")
+            raise RuntimeError(f"Authentication failed: {e}") from e
         finally:
             # Restore original redirect URI
             self.app_config.update_redirect_uri(original_redirect_uri)
