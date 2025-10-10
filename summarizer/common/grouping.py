@@ -3,10 +3,12 @@
 import logging
 import re
 from datetime import datetime, timedelta
+from typing import TYPE_CHECKING
 
-from webexpythonsdk import WebexAPI
+if TYPE_CHECKING:
+    from webexpythonsdk import WebexAPI
 
-from .models import Conversation, Message, SpaceType
+from summarizer.common.models import Conversation, Message, SpaceType
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +67,7 @@ def build_dm_conversation(
     convo_msgs: list[Message],
     user_id: str,
     conversation_id: int,
-    client: WebexAPI | None = None,
+    client: "WebexAPI | None" = None,
 ) -> Conversation:
     """Build a Conversation object for a DM conversation window."""
     participants = {m.sender.id: m.sender for m in convo_msgs}
@@ -80,7 +82,7 @@ def build_dm_conversation(
             memberships = client.memberships.list(roomId=convo_msgs[0].space_id)
             for membership in memberships:
                 if membership.personId != user_id:
-                    from .webex import safe_get_person
+                    from summarizer.webex.client import safe_get_person
 
                     other_participant = safe_get_person(client, membership.personId)
                     break
@@ -111,7 +113,7 @@ def group_dm_conversations(
     context_window: timedelta,
     user_id: str,
     include_passive: bool = False,
-    client: WebexAPI | None = None,
+    client: "WebexAPI | None" = None,
     all_messages: bool = False,
 ) -> list[Conversation]:
     """Group messages in DM space into conversations based on time context window.
@@ -368,7 +370,7 @@ def group_all_conversations(
     context_window: timedelta,
     user_id: str,
     include_passive: bool = False,
-    client: WebexAPI | None = None,
+    client: "WebexAPI | None" = None,
     all_messages: bool = False,
 ) -> list[Conversation]:
     """Group all messages (DM and group spaces) into conversations.

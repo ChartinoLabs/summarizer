@@ -58,3 +58,33 @@ class Conversation:
     end_time: datetime | None = None
     duration_seconds: int | None = None
     is_threaded: bool = False
+
+
+# =========================
+# GitHub change data models
+# =========================
+
+
+class ChangeType(Enum):
+    """Types of GitHub changes summarized by the application."""
+
+    COMMIT = "commit"
+    ISSUE = "issue"
+    PULL_REQUEST = "pull_request"
+    ISSUE_COMMENT = "issue_comment"
+    PR_COMMENT = "pr_comment"
+    REVIEW = "review"
+
+
+@dataclass
+class Change:
+    """A single GitHub change/activity record."""
+
+    id: str
+    type: ChangeType
+    timestamp: datetime
+    repo_full_name: str  # e.g., owner/name
+    title: str
+    url: str
+    summary: str | None = None
+    metadata: dict[str, str] = field(default_factory=dict)

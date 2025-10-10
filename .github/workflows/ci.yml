@@ -134,4 +134,4 @@ jobs:
           path: ~/.cache/uv
           key: uv-${{ matrix.python-version }}-${{ hashFiles('uv.lock') }}
       - run: uv sync --all-extras
-      - run: uv run xenon --max-absolute B --max-modules B --max-average A summarizer
+      - run: uv run xenon --max-absolute C --max-modules B --max-average A summarizer

@@ -1,1 +1,1 @@
-"""A tool to summarize your messages across Webex."""
+"""A tool to summarize your daily work across multiple platforms."""

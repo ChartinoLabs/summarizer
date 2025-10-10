@@ -6,8 +6,8 @@ from unittest.mock import MagicMock
 
 from webexpythonsdk import WebexAPI
 
-from summarizer.config import AppConfig
-from summarizer.webex import WebexClient
+from summarizer.webex.client import WebexClient
+from summarizer.webex.config import WebexConfig
 
 
 class TestWebexClient(unittest.TestCase):
@@ -15,7 +15,7 @@ class TestWebexClient(unittest.TestCase):
 
     def setUp(self) -> None:
         """Set up test fixtures."""
-        self.config = AppConfig(
+        self.config = WebexConfig(
             webex_token="fake_token",
             user_email="test@example.com",
             target_date=datetime(2023, 1, 1),
@@ -64,12 +64,8 @@ class TestWebexClient(unittest.TestCase):
 
         from webexpythonsdk.models.immutable import Room
 
-        from summarizer.webex import (
-            Message,
-            MessageAnalysisResult,
-            SpaceType,
-            User,
-        )
+        from summarizer.common.models import Message, SpaceType, User
+        from summarizer.webex.client import MessageAnalysisResult
 
         def fake_get_messages(
             client: WebexAPI,
@@ -97,10 +93,10 @@ class TestWebexClient(unittest.TestCase):
                 had_activity_on_or_after_date=True,
             )
 
-        import summarizer.webex as webex_mod
+        import summarizer.webex.client as webex_client_mod
 
-        orig_get_messages = webex_mod.get_messages
-        webex_mod.get_messages = fake_get_messages
+        orig_get_messages = webex_client_mod.get_messages
+        webex_client_mod.get_messages = fake_get_messages
 
         # Act
         result = self.client.get_activity(self.config.target_date, UTC)
@@ -111,4 +107,4 @@ class TestWebexClient(unittest.TestCase):
         self.assertEqual(result[1].content, "Message 2")
 
         # Clean up
-        webex_mod.get_messages = orig_get_messages
+        webex_client_mod.get_messages = orig_get_messages
