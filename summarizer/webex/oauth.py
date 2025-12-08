@@ -22,6 +22,7 @@ from urllib.parse import parse_qs, urlparse
 import requests
 from rich.console import Console
 from tenacity import (
+    before_sleep_log,
     retry,
     retry_if_exception_type,
     stop_after_attempt,
@@ -334,6 +335,7 @@ class WebexOAuthClient:
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=1, max=4),
         retry=retry_if_exception_type((requests.RequestException, requests.HTTPError)),
+        before_sleep=before_sleep_log(logger, logging.WARNING),
     )
     def refresh_access_token(
         self, credentials: WebexOAuthCredentials
