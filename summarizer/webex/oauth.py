@@ -21,6 +21,12 @@ from urllib.parse import parse_qs, urlparse
 
 import requests
 from rich.console import Console
+from tenacity import (
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 logger = logging.getLogger(__name__)
 console = Console()
@@ -324,17 +330,32 @@ class WebexOAuthClient:
         self.save_credentials(credentials)
         return credentials
 
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=1, max=4),
+        retry=retry_if_exception_type((requests.RequestException, requests.HTTPError)),
+    )
     def refresh_access_token(
         self, credentials: WebexOAuthCredentials
     ) -> WebexOAuthCredentials:
         """Refresh access token using refresh token.
+
+        This method implements retry logic with exponential backoff to handle
+        transient network errors and rate limiting (429 errors). It will
+        attempt up to 3 times with 1-4 second waits between attempts.
 
         Args:
             credentials: Current credentials with refresh token
 
         Returns:
             New credentials with refreshed access token
+
+        Raises:
+            requests.RequestException: If all retry attempts fail
+            requests.HTTPError: If the API returns a non-retryable error
         """
+        logger.debug("Attempting to refresh access token")
+
         data = {
             "grant_type": "refresh_token",
             "client_id": self.app_config.client_id,
@@ -342,34 +363,42 @@ class WebexOAuthClient:
             "refresh_token": credentials.refresh_token,
         }
 
-        response = requests.post(
-            self.TOKEN_URL,
-            data=data,
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-            timeout=30,
-        )
-        response.raise_for_status()
+        try:
+            response = requests.post(
+                self.TOKEN_URL,
+                data=data,
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                timeout=30,
+            )
+            response.raise_for_status()
 
-        token_data = response.json()
+            token_data = response.json()
 
-        # Calculate expiration time
-        expires_in = token_data.get("expires_in", 14 * 24 * 3600)  # Default 14 days
-        expires_at = datetime.now(UTC) + timedelta(seconds=expires_in)
+            # Calculate expiration time
+            expires_in = token_data.get("expires_in", 14 * 24 * 3600)  # Default 14 days
+            expires_at = datetime.now(UTC) + timedelta(seconds=expires_in)
 
-        # Keep existing refresh token if not provided
-        # (some providers don't return new one)
-        new_refresh_token = token_data.get("refresh_token", credentials.refresh_token)
+            # Keep existing refresh token if not provided
+            # (some providers don't return new one)
+            new_refresh_token = token_data.get(
+                "refresh_token", credentials.refresh_token
+            )
 
-        new_credentials = WebexOAuthCredentials(
-            access_token=token_data["access_token"],
-            refresh_token=new_refresh_token,
-            expires_at=expires_at,
-            token_type=token_data.get("token_type", "Bearer"),
-            scope=token_data.get("scope", credentials.scope),
-        )
+            new_credentials = WebexOAuthCredentials(
+                access_token=token_data["access_token"],
+                refresh_token=new_refresh_token,
+                expires_at=expires_at,
+                token_type=token_data.get("token_type", "Bearer"),
+                scope=token_data.get("scope", credentials.scope),
+            )
 
-        self.save_credentials(new_credentials)
-        return new_credentials
+            self.save_credentials(new_credentials)
+            logger.info("Successfully refreshed access token")
+            return new_credentials
+
+        except requests.RequestException as e:
+            logger.warning(f"Token refresh attempt failed: {e}")
+            raise
 
     def load_credentials(self) -> WebexOAuthCredentials | None:
         """Load OAuth credentials from file.
