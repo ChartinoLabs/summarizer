@@ -213,6 +213,7 @@ class WebexOAuthApp:
                 "spark:messages_read",
                 "spark:rooms_read",
                 "spark:people_read",
+                "meeting:schedules_read",
             ]
 
     def update_redirect_uri(self, redirect_uri: str) -> None:

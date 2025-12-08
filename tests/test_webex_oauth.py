@@ -81,8 +81,10 @@ class TestWebexOAuthApp:
             "spark:messages_read",
             "spark:rooms_read",
             "spark:people_read",
+            "meeting:schedules_read",
         ]
         assert app.scopes == expected_scopes
+        assert len(app.scopes) == 4
 
     def test_custom_scopes(self) -> None:
         """Should use custom scopes if provided."""

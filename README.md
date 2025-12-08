@@ -65,6 +65,7 @@ The recommended authentication method uses OAuth 2.0, which provides secure, lon
      - `spark:messages_read` - Read your messages
      - `spark:rooms_read` - Read your rooms/spaces
      - `spark:people_read` - Read user profile information
+     - `meeting:schedules_read` - Read meeting schedules and details
 5. Click **Add Integration**
 6. Save your **Client ID** and **Client Secret** (keep these secure!)
 
