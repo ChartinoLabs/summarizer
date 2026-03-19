@@ -60,6 +60,49 @@ class Conversation:
     is_threaded: bool = False
 
 
+# =============================
+# Webex Meeting data models
+# =============================
+
+
+@dataclass
+class TranscriptSnippet:
+    """A single speaker-attributed snippet from a meeting transcript."""
+
+    speaker: User
+    text: str
+    start_time: datetime | None = None
+
+
+@dataclass
+class MeetingSummary:
+    """AI-generated summary for a Webex meeting."""
+
+    overview: str = ""
+    notes: list[str] = field(default_factory=list)
+    action_items: list[str] = field(default_factory=list)
+    raw_json: dict | None = None  # Complete API response for RAG
+
+
+@dataclass
+class Meeting:
+    """Data for a Webex meeting with optional transcript and AI summary."""
+
+    id: str
+    title: str
+    start_time: datetime
+    end_time: datetime
+    duration_seconds: int
+    host: User
+    participants: list[User] = field(default_factory=list)
+    meeting_series_id: str | None = None
+    site_url: str | None = None
+    summary: MeetingSummary | None = None
+    transcript_snippets: list[TranscriptSnippet] = field(default_factory=list)
+    transcript_id: str | None = None
+    transcript_vtt: str | None = None  # Full WebVTT transcript text
+
+
 # =========================
 # GitHub change data models
 # =========================

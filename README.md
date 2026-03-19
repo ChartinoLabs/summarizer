@@ -1,12 +1,14 @@
 # Summarizer
 
-Summarizes the work a person has done within a given day across multiple applications, or retrieves the complete message history from specific Webex rooms/conversations. This is useful for asynchronous scrum check-ins, work reporting systems, or analyzing conversation history with specific teams or individuals.
+Summarizes the work a person has done within a given day across multiple applications, or retrieves the complete message history from specific Webex rooms/conversations. All activity data is persisted to a local SQLite database for offline access, historical analysis, and RAG knowledge base construction.
+
+This is useful for asynchronous scrum check-ins, work reporting systems, analyzing conversation history, or building a searchable archive of your professional activity.
 
 ## Supported Applications
 
 ### Webex
 
-Leverages the Webex API to provide two main capabilities:
+Leverages the Webex API to provide three main capabilities:
 
 **Date-Based Activity Summary:**
 
@@ -14,6 +16,14 @@ Leverages the Webex API to provide two main capabilities:
 - Shows who the conversation was with (direct message or group conversation)
 - Displays when conversations started and ended, plus duration
 - Groups messages into logical conversation windows
+
+**Meeting Transcripts and Summaries:**
+
+- Fetches all Webex meetings for the target date with full participant lists
+- Downloads AI-generated meeting summaries (overview, notes, action items)
+- Downloads full WebVTT transcripts and speaker-attributed transcript snippets
+- Paginates through all transcript snippets (no cap on snippet count)
+- Stores complete API response JSON for summaries to preserve all metadata
 
 **Room-Specific Message History:**
 
@@ -62,9 +72,11 @@ The recommended authentication method uses OAuth 2.0, which provides secure, lon
    - **Description**: Brief description of your usage
    - **Redirect URI**: `http://localhost:8080/callback` (the app will use available ports 8080-8089)
    - **Scopes**: Select the following required scopes:
-     - `spark:messages_read` - Read your messages
-     - `spark:rooms_read` - Read your rooms/spaces
-     - `spark:people_read` - Read user profile information
+     - `spark:all` - Full access to Webex messaging
+     - `meeting:schedules_read` - Read meeting schedules
+     - `meeting:participants_read` - Read meeting participant lists
+     - `meeting:transcripts_read` - Read and download meeting transcripts
+     - `meeting:summaries_read` - Read AI-generated meeting summaries
 5. Click **Add Integration**
 6. Save your **Client ID** and **Client Secret** (keep these secure!)
 
@@ -145,6 +157,30 @@ You can also specify a date range to summarize activity over multiple days. The 
 
 ```bash
 uv run summarizer --start-date=2024-06-01 --end-date=2024-06-03
+```
+
+When processing a date range, the summarizer handles each date independently. If a transient API error occurs (e.g., a 502 from Webex), that date is skipped and processing continues. Failed dates are reported at the end so you can re-run them individually.
+
+### Caching and Force Refresh
+
+All API results are automatically cached in a local SQLite database. Re-running for a date that has already been fetched will load from the cache instead of making live API calls.
+
+To bypass the cache and re-fetch from the live APIs (e.g., after adding full transcript support):
+
+```bash
+# Re-fetch a single date
+uv run summarizer --target-date=2024-06-01 --force-refresh
+
+# Re-fetch a date range
+uv run summarizer --start-date=2024-06-01 --end-date=2024-06-30 --force-refresh
+```
+
+### Disabling Meetings
+
+If you only need chat messages and want to skip meeting transcript/summary fetching:
+
+```bash
+uv run summarizer --target-date=2024-06-01 --no-meetings
 ```
 
 ### OAuth Management Commands
@@ -253,7 +289,125 @@ Other options (with defaults):
 - `--room-chunk-size`: Room fetch chunk size (default: 50)
 - `--max-messages`: Maximum number of messages to retrieve from room (default: 1000)
 - `--all-messages`: Retrieve ALL messages from room regardless of user participation (default: False)
+- `--force-refresh`: Bypass the local cache and re-fetch all data from live APIs.
+- `--no-meetings`: Skip Webex meeting transcript and summary fetching.
+- `--no-webex`: Disable Webex processing entirely.
+- `--no-github`: Disable GitHub processing entirely.
 - `--debug`: Enable debug logging.
+
+## Data Persistence
+
+All fetched activity data is automatically persisted to a local SQLite database at `~/.config/summarizer/activity.db`. This serves as both a cache (avoiding redundant API calls) and a knowledge base for downstream analysis or RAG applications.
+
+### Database Schema
+
+```
+┌─────────────────────┐     ┌──────────────────────────┐
+│     fetch_log       │     │         users            │
+├─────────────────────┤     ├──────────────────────────┤
+│ date (PK)           │     │ id (PK)                  │
+│ platform (PK)       │     │ display_name             │
+│ fetched_at          │     └──────────┬───────────────┘
+└─────────────────────┘                │
+                                       │ referenced by
+        ┌──────────────────────────────┼──────────────────────────┐
+        │                              │                          │
+        ▼                              ▼                          ▼
+┌───────────────────┐   ┌─────────────────────────┐   ┌──────────────────────┐
+│   conversations   │   │       messages          │   │      meetings        │
+├───────────────────┤   ├─────────────────────────┤   ├──────────────────────┤
+│ id (PK)           │   │ id (PK)                 │   │ id (PK)              │
+│ date              │   │ date                    │   │ date                 │
+│ space_id          │   │ space_id                │   │ title                │
+│ space_type        │   │ space_type              │   │ start_time           │
+│ start_time        │   │ space_name              │   │ end_time             │
+│ end_time          │   │ sender_id → users       │   │ duration_seconds     │
+│ duration_seconds  │   │ timestamp               │   │ host_id → users      │
+│ is_threaded       │   │ content                 │   │ meeting_series_id    │
+└───────┬───────────┘   │ thread_id               │   │ site_url             │
+        │               │ conversation_id         │   │ transcript_id        │
+        │               └─────────────────────────┘   │ transcript_vtt       │
+        │                                             │ summary_overview     │
+        ▼                                             │ summary_notes        │
+┌────────────────────────────┐                        │ summary_action_items │
+│ conversation_participants  │                        │ summary_raw_json     │
+├────────────────────────────┤                        └───────┬──────────────┘
+│ conversation_id (PK)       │                                │
+│ user_id (PK) → users       │                                ▼
+└────────────────────────────┘                   ┌──────────────────────────┐
+                                                 │  transcript_snippets    │
+┌────────────────────────────┐                   ├──────────────────────────┤
+│ conversation_messages      │                   │ id (PK, autoincrement)   │
+├────────────────────────────┤                   │ meeting_id → meetings    │
+│ conversation_id (PK)       │                   │ speaker_id → users       │
+│ message_id (PK) → messages │                   │ text                     │
+│ position                   │                   │ start_time               │
+└────────────────────────────┘                   │ position                 │
+                                                 └──────────────────────────┘
+┌────────────────────────────┐
+│   meeting_participants     │   ┌──────────────────────┐
+├────────────────────────────┤   │      changes         │
+│ meeting_id (PK) → meetings │   ├──────────────────────┤
+│ user_id (PK) → users       │   │ id (PK)              │
+└────────────────────────────┘   │ date                 │
+                                 │ type                 │
+┌────────────────────────────┐   │ timestamp            │
+│   message_recipients       │   │ repo_full_name       │
+├────────────────────────────┤   │ title                │
+│ message_id (PK) → messages │   │ url                  │
+│ user_id (PK) → users       │   │ summary              │
+└────────────────────────────┘   │ metadata (JSON)      │
+                                 └──────────────────────┘
+```
+
+### Key Fields
+
+| Table | Field | Description |
+|-------|-------|-------------|
+| `meetings` | `transcript_vtt` | Full WebVTT transcript text downloaded from the Webex Meetings API |
+| `meetings` | `summary_raw_json` | Complete JSON response from the AI summary API, preserving all metadata |
+| `meetings` | `summary_overview` | Extracted meeting overview text |
+| `meetings` | `summary_notes` | JSON array of meeting notes |
+| `meetings` | `summary_action_items` | JSON array of action items |
+| `transcript_snippets` | `text` | Speaker-attributed transcript segments with timestamps |
+| `changes` | `type` | GitHub change type: `commit`, `issue`, `pull_request`, `comment`, `review` |
+| `changes` | `metadata` | JSON blob with platform-specific details (PR state, labels, etc.) |
+
+### JSON Exports
+
+Each run also exports a JSON file to `~/.config/summarizer/exports/` alongside the database. These files contain the same data in a portable format suitable for RAG pipelines or external tools.
+
+### Querying the Database
+
+The database uses SQLite WAL mode for concurrent read access. You can query it directly:
+
+```bash
+# Count meetings with full transcripts
+sqlite3 ~/.config/summarizer/activity.db \
+  "SELECT COUNT(*) FROM meetings WHERE transcript_vtt IS NOT NULL"
+
+# Find meetings with action items
+sqlite3 ~/.config/summarizer/activity.db \
+  "SELECT date, title, summary_action_items FROM meetings
+   WHERE summary_action_items IS NOT NULL AND summary_action_items != '[]'
+   ORDER BY date DESC LIMIT 10"
+
+# Search message content
+sqlite3 ~/.config/summarizer/activity.db \
+  "SELECT m.date, u.display_name, m.content
+   FROM messages m JOIN users u ON m.sender_id = u.id
+   WHERE m.content LIKE '%kubernetes%'
+   ORDER BY m.timestamp DESC LIMIT 20"
+
+# Get all participants for a meeting
+sqlite3 ~/.config/summarizer/activity.db \
+  "SELECT m.title, m.date, GROUP_CONCAT(u.display_name, ', ') as participants
+   FROM meetings m
+   JOIN meeting_participants mp ON m.id = mp.meeting_id
+   JOIN users u ON mp.user_id = u.id
+   GROUP BY m.id
+   ORDER BY m.date DESC LIMIT 10"
+```
 
 ## Troubleshooting
 
@@ -308,6 +462,9 @@ For additional support:
 ### Security Notes
 
 - OAuth credentials are stored securely in `~/.config/summarizer/`
+- Activity database is stored at `~/.config/summarizer/activity.db`
+- JSON exports are written to `~/.config/summarizer/exports/`
 - Never share your Client Secret or access tokens
 - Use environment variables or secure credential storage
 - Regularly review and rotate your API tokens
+- The database may contain sensitive meeting transcripts and message content

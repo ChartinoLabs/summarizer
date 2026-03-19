@@ -210,9 +210,11 @@ class WebexOAuthApp:
         """Set default scopes if not provided."""
         if self.scopes is None:
             self.scopes = [
-                "spark:messages_read",
-                "spark:rooms_read",
-                "spark:people_read",
+                "spark:all",
+                "meeting:schedules_read",
+                "meeting:participants_read",
+                "meeting:transcripts_read",
+                "meeting:summaries_read",
             ]
 
     def update_redirect_uri(self, redirect_uri: str) -> None:

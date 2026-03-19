@@ -10,8 +10,10 @@ from summarizer.common.console_ui import (
     console,
     display_changes,
     display_changes_summary,
+    print_cache_indicator,
 )
 from summarizer.common.models import Message
+from summarizer.common.persistence import ActivityStore
 from summarizer.common.runner import BaseRunner
 from summarizer.github.client import GithubClient
 from summarizer.github.config import GithubConfig
@@ -46,39 +48,57 @@ class GithubRunner(BaseRunner):
         console.log(f"Connected to GitHub as [bold green]{identity.login}[/]")
 
     # Override BaseRunner.run to avoid conversation grouping
-    def run(self, date_header: bool = False) -> None:  # type: ignore[override]
+    def run(  # type: ignore[override]
+        self,
+        date_header: bool = False,
+        force_refresh: bool = False,
+    ) -> None:
         """Execute the GitHub flow for a single date."""
         if date_header:
             from summarizer.common.console_ui import print_date_header
 
             print_date_header(self.config.target_date)
 
-        with console.status("[bold green]Connecting to APIs...[/]"):
-            self.connect()
+        date_str = self.config.target_date.strftime("%Y-%m-%d")
+        store = ActivityStore()
 
-        # Use Pacific Time date boundaries to match GitHub's contribution calendar
-        # GitHub uses Pacific Time (US/Pacific) for determining which day
-        # contributions belong to. This prevents timezone-related date leakage.
-        github_tz = ZoneInfo("US/Pacific")
-        target_date = self.config.target_date.date()  # Get just the date part
+        if not force_refresh and store.has_github_data(date_str):
+            # CACHE HIT
+            print_cache_indicator(
+                "GitHub", store.get_fetch_timestamp(date_str, "github")
+            )
+            changes = store.load_github_changes(date_str)
+        else:
+            # CACHE MISS — full API flow
+            with console.status("[bold green]Connecting to APIs...[/]"):
+                self.connect()
 
-        # Create the date boundaries in Pacific Time, then convert to UTC
-        pt_start = datetime.combine(target_date, datetime.min.time()).replace(
-            tzinfo=github_tz
-        )
-        pt_end = pt_start + timedelta(days=1)
+            # Use Pacific Time date boundaries to match GitHub's contribution calendar
+            github_tz = ZoneInfo("US/Pacific")
+            target_date = self.config.target_date.date()
 
-        # Convert to UTC for the API calls
-        start = pt_start.astimezone(UTC)
-        end = pt_end.astimezone(UTC)
+            pt_start = datetime.combine(target_date, datetime.min.time()).replace(
+                tzinfo=github_tz
+            )
+            pt_end = pt_start + timedelta(days=1)
 
-        if not self.client:
-            raise RuntimeError("Must call connect() before run()")
+            start = pt_start.astimezone(UTC)
+            end = pt_end.astimezone(UTC)
 
-        changes = self.client.get_changes(start, end)
+            if not self.client:
+                raise RuntimeError("Must call connect() before run()")
 
+            changes = self.client.get_changes(start, end)
+
+            # Persist to cache
+            store.store_github_changes(date_str, changes)
+
+        # Display (same whether from cache or API)
         display_changes(changes)
         display_changes_summary(changes)
+
+        # Always export JSON
+        store.export_json(date_str, changes=changes)
 
     # Unused by GitHub runner; implemented to satisfy abstract base class
     def get_activity(self, date: datetime, local_tz: tzinfo) -> list[Message]:  # type: ignore[override]

@@ -4,15 +4,23 @@ import logging
 from collections.abc import Generator
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from datetime import UTC, datetime, tzinfo
+from datetime import UTC, datetime, timedelta, tzinfo
 
+import requests
 from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
 from webexpythonsdk import WebexAPI
 from webexpythonsdk.exceptions import ApiError
 from webexpythonsdk.models.immutable import Message as SDKMessage, Person, Room
 
 from summarizer.common.console_ui import console
-from summarizer.common.models import Message, SpaceType, User
+from summarizer.common.models import (
+    Meeting,
+    MeetingSummary,
+    Message,
+    SpaceType,
+    TranscriptSnippet,
+    User,
+)
 from summarizer.webex.config import WebexConfig
 
 logger = logging.getLogger(__name__)
@@ -457,6 +465,378 @@ class WebexClient:
         logger.info("A total of %d messages were found on date %s", len(messages), date)
         messages.sort(key=lambda x: x.timestamp)
         return messages
+
+    # =========================================
+    # Meeting / Transcript / Summary methods
+    # =========================================
+
+    _WEBEX_API_BASE = "https://webexapis.com/v1"
+
+    def _webex_api_get(
+        self,
+        endpoint: str,
+        params: dict[str, str] | None = None,
+    ) -> dict | list | None:
+        """Authenticated GET to the Webex REST API.
+
+        Returns the parsed JSON body on success, or None on 401/403/404.
+
+        Args:
+            endpoint: API path relative to base URL (e.g. "/meetingTranscripts")
+            params: Optional query parameters
+
+        Returns:
+            Parsed JSON response or None on expected error codes
+        """
+        token = self.config.get_access_token()
+        if not token:
+            logger.warning("No access token available for REST call to %s", endpoint)
+            return None
+
+        url = f"{self._WEBEX_API_BASE}{endpoint}"
+        headers = {"Authorization": f"Bearer {token}"}
+
+        try:
+            resp = requests.get(url, headers=headers, params=params, timeout=30)
+            resp.raise_for_status()
+            return resp.json()
+        except requests.exceptions.HTTPError as exc:
+            status = exc.response.status_code if exc.response is not None else 0
+            if status in (401, 403, 404):
+                logger.debug(
+                    "REST %s returned %s for %s — returning None",
+                    endpoint,
+                    status,
+                    params,
+                )
+                return None
+            logger.warning("REST %s failed (%s): %s", endpoint, status, exc)
+            return None
+        except requests.exceptions.RequestException as exc:
+            logger.warning("REST request to %s failed: %s", endpoint, exc)
+            return None
+
+    def _webex_api_get_text(
+        self,
+        endpoint: str,
+        params: dict[str, str] | None = None,
+    ) -> str | None:
+        """Authenticated GET returning raw text (e.g. VTT transcript downloads).
+
+        Args:
+            endpoint: API path relative to base URL
+            params: Optional query parameters
+
+        Returns:
+            Response body as text, or None on error
+        """
+        token = self.config.get_access_token()
+        if not token:
+            logger.warning("No access token available for text GET %s", endpoint)
+            return None
+
+        url = f"{self._WEBEX_API_BASE}{endpoint}"
+        headers = {"Authorization": f"Bearer {token}"}
+
+        try:
+            resp = requests.get(url, headers=headers, params=params, timeout=60)
+            resp.raise_for_status()
+            return resp.text
+        except requests.exceptions.HTTPError as exc:
+            status = exc.response.status_code if exc.response is not None else 0
+            if status in (401, 403, 404):
+                logger.debug(
+                    "Text GET %s returned %s — returning None", endpoint, status
+                )
+                return None
+            logger.warning("Text GET %s failed (%s): %s", endpoint, status, exc)
+            return None
+        except requests.exceptions.RequestException as exc:
+            logger.warning("Text GET request to %s failed: %s", endpoint, exc)
+            return None
+
+    def get_meetings_for_date(self, date: datetime, local_tz: tzinfo) -> list[Meeting]:
+        """Fetch meetings from the Webex Meetings API for the target date.
+
+        Uses the SDK ``meetings.list()`` method to retrieve scheduled meetings
+        that fall within the target date (in local timezone).
+
+        Args:
+            date: Target date to query
+            local_tz: User's local timezone for date boundary calculation
+
+        Returns:
+            List of Meeting dataclasses (metadata only, no transcripts/summaries)
+        """
+        # Build date boundaries in local tz, then convert to UTC ISO strings
+        day_start = datetime(date.year, date.month, date.day, tzinfo=local_tz)
+        day_end = day_start + timedelta(days=1)
+        from_str = day_start.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        to_str = day_end.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        meetings: list[Meeting] = []
+        try:
+            sdk_meetings = self._client.meetings.list(
+                meetingType="meeting", **{"from": from_str, "to": to_str}
+            )
+            for m in sdk_meetings:
+                start_dt = datetime.fromisoformat(m.start).astimezone(local_tz)
+                end_dt = datetime.fromisoformat(m.end).astimezone(local_tz)
+                duration = int((end_dt - start_dt).total_seconds())
+                host = User(
+                    id=getattr(m, "hostUserId", "") or "",
+                    display_name=getattr(m, "hostDisplayName", "") or "",
+                )
+                meetings.append(
+                    Meeting(
+                        id=m.id,
+                        title=m.title or "(Untitled Meeting)",
+                        start_time=start_dt,
+                        end_time=end_dt,
+                        duration_seconds=duration,
+                        host=host,
+                        meeting_series_id=getattr(m, "meetingSeriesId", None),
+                        site_url=getattr(m, "siteUrl", None),
+                    )
+                )
+        except ApiError as exc:
+            logger.warning("Failed to list meetings: %s", exc)
+        except Exception as exc:
+            logger.warning("Unexpected error listing meetings: %s", exc)
+
+        logger.info("Found %d meetings for %s", len(meetings), date.date())
+        return meetings
+
+    def get_meeting_transcripts_for_date(
+        self, date: datetime, local_tz: tzinfo
+    ) -> dict[str, str]:
+        """Get a mapping of meetingId → transcriptId for transcripts on the date.
+
+        Args:
+            date: Target date
+            local_tz: User's local timezone
+
+        Returns:
+            Dict mapping meeting ID to its transcript ID
+        """
+        day_start = datetime(date.year, date.month, date.day, tzinfo=local_tz)
+        day_end = day_start + timedelta(days=1)
+        from_str = day_start.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        to_str = day_end.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        data = self._webex_api_get(
+            "/meetingTranscripts",
+            params={"meetingStartTimeFrom": from_str, "meetingStartTimeTo": to_str},
+        )
+        if not data or "items" not in data:
+            return {}
+
+        mapping: dict[str, str] = {}
+        for item in data["items"]:
+            meeting_id = item.get("meetingId")
+            transcript_id = item.get("id")
+            if meeting_id and transcript_id:
+                mapping[meeting_id] = transcript_id
+
+        logger.info("Found %d transcript(s) for %s", len(mapping), date.date())
+        return mapping
+
+    def get_transcript_snippets(self, transcript_id: str) -> list[TranscriptSnippet]:
+        """Fetch all speaker-attributed transcript snippets for a transcript.
+
+        Paginates through all pages to return the complete set of snippets.
+
+        Args:
+            transcript_id: The transcript ID to fetch snippets for
+
+        Returns:
+            List of TranscriptSnippet dataclasses
+        """
+        snippets: list[TranscriptSnippet] = []
+        endpoint = f"/meetingTranscripts/{transcript_id}/snippets"
+
+        while endpoint:
+            data = self._webex_api_get(endpoint)
+            if not data or "items" not in data:
+                break
+
+            for item in data["items"]:
+                speaker = User(
+                    id=item.get("personId", ""),
+                    display_name=item.get("personName", "Unknown Speaker"),
+                )
+                start_time = None
+                if item.get("startTime"):
+                    try:
+                        start_time = datetime.fromisoformat(item["startTime"])
+                    except (ValueError, TypeError):
+                        pass
+                snippets.append(
+                    TranscriptSnippet(
+                        speaker=speaker,
+                        text=item.get("text", ""),
+                        start_time=start_time,
+                    )
+                )
+
+            # Follow pagination link if present
+            next_url = data.get("next")
+            if next_url and isinstance(next_url, str):
+                # next_url is a full URL; strip the base to get the endpoint
+                if next_url.startswith(self._WEBEX_API_BASE):
+                    endpoint = next_url[len(self._WEBEX_API_BASE) :]
+                else:
+                    endpoint = next_url
+            else:
+                endpoint = None  # type: ignore[assignment]
+
+        return snippets
+
+    def download_transcript_vtt(self, transcript_id: str) -> str | None:
+        """Download the full WebVTT transcript for a meeting.
+
+        Args:
+            transcript_id: The transcript ID to download
+
+        Returns:
+            WebVTT content as a string, or None if unavailable
+        """
+        return self._webex_api_get_text(f"/meetingTranscripts/{transcript_id}/download")
+
+    def get_meeting_summary(self, meeting_id: str) -> MeetingSummary | None:
+        """Fetch the AI-generated summary for a specific meeting.
+
+        Args:
+            meeting_id: The meeting ID to fetch the summary for
+
+        Returns:
+            MeetingSummary dataclass or None if unavailable
+        """
+        data = self._webex_api_get(
+            "/meetingSummaries", params={"meetingId": meeting_id}
+        )
+        if not data or "items" not in data or not data["items"]:
+            return None
+
+        item = data["items"][0]
+        return MeetingSummary(
+            overview=item.get("overview", ""),
+            notes=item.get("notes", []),
+            action_items=item.get("actionItems", []),
+            raw_json=item,
+        )
+
+    def get_meeting_participants(self, meeting_id: str) -> list[User]:
+        """Fetch participants for a specific meeting.
+
+        Uses the ``GET /meetingParticipants`` endpoint to retrieve the list
+        of people who actually joined the meeting.
+
+        Args:
+            meeting_id: The meeting ID to fetch participants for
+
+        Returns:
+            List of User dataclasses for each participant
+        """
+        data = self._webex_api_get(
+            "/meetingParticipants", params={"meetingId": meeting_id}
+        )
+        if not data or "items" not in data:
+            return []
+
+        participants: list[User] = []
+        for item in data["items"]:
+            user_id = item.get("id", "") or ""
+            display_name = item.get("displayName", "") or ""
+            if not display_name:
+                # Fall back to email if display name missing
+                display_name = item.get("email", "Unknown")
+            participants.append(User(id=user_id, display_name=display_name))
+
+        return participants
+
+    def get_meetings_with_details(
+        self, date: datetime, local_tz: tzinfo
+    ) -> list[Meeting]:
+        """Fetch meetings and enrich each with transcript snippets and AI summary.
+
+        Orchestrator method that calls the individual meeting, transcript, and
+        summary methods, then merges results into fully-enriched Meeting objects.
+
+        Args:
+            date: Target date
+            local_tz: User's local timezone
+
+        Returns:
+            List of Meeting dataclasses enriched with summaries and transcripts
+        """
+        meetings = self.get_meetings_for_date(date, local_tz)
+        if not meetings:
+            return meetings
+
+        # Get transcript mapping for the date
+        transcript_map = self.get_meeting_transcripts_for_date(date, local_tz)
+
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[bold blue]Enriching meetings with details..."),
+            TextColumn("[green]{task.completed}/{task.total}"),
+            BarColumn(),
+            console=console,
+        ) as progress:
+            task = progress.add_task("Enriching meetings...", total=len(meetings))
+
+            for meeting in meetings:
+                # Attach transcript if available
+                t_id = transcript_map.get(meeting.id)
+                if t_id:
+                    meeting.transcript_id = t_id
+                    try:
+                        meeting.transcript_snippets = self.get_transcript_snippets(t_id)
+                    except Exception as exc:
+                        logger.warning(
+                            "Failed to get transcript snippets for %s: %s",
+                            meeting.id,
+                            exc,
+                        )
+                    try:
+                        meeting.transcript_vtt = self.download_transcript_vtt(t_id)
+                    except Exception as exc:
+                        logger.warning(
+                            "Failed to download VTT transcript for %s: %s",
+                            meeting.id,
+                            exc,
+                        )
+
+                # Attach AI summary
+                try:
+                    meeting.summary = self.get_meeting_summary(meeting.id)
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to get meeting summary for %s: %s",
+                        meeting.id,
+                        exc,
+                    )
+
+                # Attach participants
+                try:
+                    meeting.participants = self.get_meeting_participants(meeting.id)
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to get participants for %s: %s",
+                        meeting.id,
+                        exc,
+                    )
+
+                progress.update(task, advance=1)
+
+        enriched_count = sum(1 for m in meetings if m.summary or m.transcript_snippets)
+        logger.info(
+            "Enriched %d/%d meetings with summaries/transcripts",
+            enriched_count,
+            len(meetings),
+        )
+        return meetings
 
     def add_users_to_room(
         self, room_id: str, user_emails: list[str]

@@ -78,9 +78,11 @@ class TestWebexOAuthApp:
         """Should have default scopes if none provided."""
         app = WebexOAuthApp(client_id="id", client_secret="secret")
         expected_scopes = [
-            "spark:messages_read",
-            "spark:rooms_read",
-            "spark:people_read",
+            "spark:all",
+            "meeting:schedules_read",
+            "meeting:participants_read",
+            "meeting:transcripts_read",
+            "meeting:summaries_read",
         ]
         assert app.scopes == expected_scopes
 

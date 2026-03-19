@@ -9,9 +9,13 @@ from summarizer.common.console_ui import (
     console,
     display_conversations,
     display_conversations_summary,
+    display_meetings,
+    display_meetings_summary,
+    print_cache_indicator,
 )
 from summarizer.common.grouping import group_all_conversations
-from summarizer.common.models import Conversation, Message
+from summarizer.common.models import Conversation, Meeting, Message
+from summarizer.common.persistence import ActivityStore
 from summarizer.common.runner import BaseRunner
 from summarizer.webex.client import WebexClient
 from summarizer.webex.config import WebexConfig
@@ -188,6 +192,8 @@ class WebexRunner(BaseRunner):
         room_search_mode: str | None = None,
         room_search_value: str | None = None,
         apply_date_filter: bool = True,
+        include_meetings: bool = True,
+        force_refresh: bool = False,
     ) -> None:
         """Run the Webex application with optional room search support."""
         local_tz = datetime.now().astimezone().tzinfo
@@ -206,26 +212,39 @@ class WebexRunner(BaseRunner):
 
             print_date_header(self.config.target_date)
 
-        with console.status("[bold green]Connecting to APIs...[/]"):
-            self.connect()
-
-        # Get message data based on search mode
+        # Room-search mode always bypasses cache (not date-keyed activity)
         if room_search_mode and room_search_value:
-            # Room-specific workflow
-            message_data = self.get_room_messages(
+            self._run_room_search(
                 room_search_mode,
                 room_search_value,
                 local_tz,
                 apply_date_filter,
+                include_meetings,
             )
-            if message_data is None:
-                return
+            return
+
+        # Date-based workflow — use cache
+        if self.config.target_date is None:
+            raise ValueError(
+                "Target date is required for traditional date-based workflow"
+            )
+
+        date_str = self.config.target_date.strftime("%Y-%m-%d")
+        store = ActivityStore()
+        conversations: list[Conversation]
+        meetings: list[Meeting] = []
+
+        if not force_refresh and store.has_webex_data(date_str):
+            # CACHE HIT
+            print_cache_indicator("Webex", store.get_fetch_timestamp(date_str, "webex"))
+            conversations = store.load_webex_conversations(date_str)
+            if include_meetings:
+                meetings = store.load_webex_meetings(date_str)
         else:
-            # Traditional date-based workflow
-            if self.config.target_date is None:
-                raise ValueError(
-                    "Target date is required for traditional date-based workflow"
-                )
+            # CACHE MISS — run the full API flow
+            with console.status("[bold green]Connecting to APIs...[/]"):
+                self.connect()
+
             console.print(
                 f"Looking for activity on [bold]{self.config.target_date.date()}[/]..."
             )
@@ -233,15 +252,120 @@ class WebexRunner(BaseRunner):
                 self.config.target_date, local_tz, self.config.all_messages
             )
 
-        # Conversation grouping integration
-        context_window = timedelta(minutes=self.config.context_window_minutes)
-        user_id = self.get_user_id()
-        conversations = self._group_conversations(message_data, context_window, user_id)
+            context_window = timedelta(minutes=self.config.context_window_minutes)
+            user_id = self.get_user_id()
+            conversations = self._group_conversations(
+                message_data, context_window, user_id
+            )
 
-        # Display results
+            if include_meetings and self.config.target_date:
+                meetings = self._fetch_meetings(local_tz)
+
+            # Persist to cache
+            store.store_webex_conversations(date_str, conversations)
+            if meetings:
+                store.store_webex_meetings(date_str, meetings)
+
+        # Display results (same whether from cache or API)
         display_conversations(
             conversations, time_display_format=self.config.time_display_format
         )
         display_conversations_summary(
             conversations, time_display_format=self.config.time_display_format
         )
+
+        if include_meetings and meetings:
+            display_meetings(
+                meetings,
+                time_display_format=self.config.time_display_format,
+            )
+            display_meetings_summary(
+                meetings,
+                time_display_format=self.config.time_display_format,
+            )
+
+        # Always export JSON
+        store.export_json(
+            date_str,
+            conversations=conversations,
+            meetings=meetings if include_meetings else None,
+        )
+
+    def _run_room_search(
+        self,
+        room_search_mode: str,
+        room_search_value: str,
+        local_tz: tzinfo,
+        apply_date_filter: bool,
+        include_meetings: bool,
+    ) -> None:
+        """Execute the room-search workflow (bypasses cache)."""
+        with console.status("[bold green]Connecting to APIs...[/]"):
+            self.connect()
+
+        message_data = self.get_room_messages(
+            room_search_mode,
+            room_search_value,
+            local_tz,
+            apply_date_filter,
+        )
+        if message_data is None:
+            return
+
+        context_window = timedelta(minutes=self.config.context_window_minutes)
+        user_id = self.get_user_id()
+        conversations = self._group_conversations(message_data, context_window, user_id)
+
+        display_conversations(
+            conversations, time_display_format=self.config.time_display_format
+        )
+        display_conversations_summary(
+            conversations, time_display_format=self.config.time_display_format
+        )
+
+        if include_meetings and self.config.target_date:
+            meetings = self._fetch_meetings(local_tz)
+            if meetings:
+                display_meetings(
+                    meetings,
+                    time_display_format=self.config.time_display_format,
+                )
+                display_meetings_summary(
+                    meetings,
+                    time_display_format=self.config.time_display_format,
+                )
+
+    def _fetch_meetings(self, local_tz: tzinfo) -> list:
+        """Fetch Webex meetings for the target date.
+
+        Isolated in a try/except so meeting API failures never break
+        the conversation output. Returns an empty list on failure.
+
+        Args:
+            local_tz: User's local timezone
+
+        Returns:
+            List of Meeting objects, or empty list on failure.
+        """
+        if not self.client:
+            raise RuntimeError("Must call connect() before _fetch_meetings()")
+
+        try:
+            return self.client.get_meetings_with_details(
+                self.config.target_date, local_tz
+            )
+        except Exception as exc:
+            logger.warning("Failed to fetch meetings: %s", exc)
+            console.print(
+                "\n[yellow]Could not fetch meeting data. "
+                "This may be due to missing OAuth scopes.[/]"
+            )
+            console.print(
+                "[yellow]Ensure your Webex integration includes: "
+                "meeting:schedules_read, meeting:transcripts_read, "
+                "meeting:summaries_read[/]"
+            )
+            console.print(
+                "[yellow]Then re-authenticate with: summarizer webex login[/]"
+            )
+            return []

@@ -24,6 +24,7 @@ class WebexConfig(BaseConfig):
         room_chunk_size: int = 50,
         max_messages: int = 1000,
         all_messages: bool = False,
+        include_meetings: bool = True,
     ) -> None:
         """Initialize Webex configuration.
 
@@ -40,6 +41,7 @@ class WebexConfig(BaseConfig):
             room_chunk_size: Batch size for room processing
             max_messages: Maximum number of messages to retrieve from a room
             all_messages: Retrieve all messages regardless of user participation
+            include_meetings: Fetch and display meeting transcripts/summaries
         """
         super().__init__(
             user_email=user_email,
@@ -55,6 +57,7 @@ class WebexConfig(BaseConfig):
         self.room_chunk_size = room_chunk_size
         self.max_messages = max_messages
         self.all_messages = all_messages
+        self.include_meetings = include_meetings
 
         # Initialize OAuth client if credentials provided
         self._oauth_client: WebexOAuthClient | None = None

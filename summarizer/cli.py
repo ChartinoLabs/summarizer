@@ -191,6 +191,7 @@ def _run_webex_for_date(
     room_search_mode: str | None = None,
     room_search_value: str | None = None,
     apply_date_filter: bool = True,
+    force_refresh: bool = False,
 ) -> None:
     """Run Webex summarizer for a specific date or room search."""
     logger.info("Attempting to log into Webex API as user %s", config.user_email)
@@ -208,6 +209,7 @@ def _run_webex_for_date(
     logger.info("Time display format: %s", config.time_display_format)
     logger.info("Room fetch chunk size: %d", config.room_chunk_size)
     logger.info("All messages mode: %s", config.all_messages)
+    logger.info("Include meetings: %s", config.include_meetings)
 
     runner = WebexRunner(config)
     runner.run(
@@ -215,15 +217,19 @@ def _run_webex_for_date(
         room_search_mode=room_search_mode,
         room_search_value=room_search_value,
         apply_date_filter=apply_date_filter,
+        include_meetings=config.include_meetings,
+        force_refresh=force_refresh,
     )
 
 
-def _run_github_for_date(config: GithubConfig, date_header: bool) -> None:
+def _run_github_for_date(
+    config: GithubConfig, date_header: bool, force_refresh: bool = False
+) -> None:
     """Run GitHub summarizer for a specific date."""
     logger.info("Attempting to access GitHub as user %s", config.user)
     logger.info("Targeted date for summarization: %s", config.target_date)
     runner = GithubRunner(config)
-    runner.run(date_header=date_header)
+    runner.run(date_header=date_header, force_refresh=force_refresh)
 
 
 _INCLUDE_SYNONYMS: dict[str, ChangeType] = {
@@ -288,6 +294,7 @@ def _build_webex_args(
     room_chunk_size: int,
     max_messages: int,
     all_messages: bool,
+    include_meetings: bool,
 ) -> dict:
     """Build Webex arguments dictionary for _execute_for_date."""
     return dict(
@@ -301,6 +308,7 @@ def _build_webex_args(
         room_chunk_size=room_chunk_size,
         max_messages=max_messages,
         all_messages=all_messages,
+        include_meetings=include_meetings,
     )
 
 
@@ -348,6 +356,7 @@ def _build_webex_config(
     room_chunk_size: int,
     max_messages: int,
     all_messages: bool,
+    include_meetings: bool,
 ) -> WebexConfig:
     """Build WebexConfig for a specific date."""
     return WebexConfig(
@@ -362,6 +371,7 @@ def _build_webex_config(
         room_chunk_size=room_chunk_size,
         max_messages=max_messages,
         all_messages=all_messages,
+        include_meetings=include_meetings,
     )
 
 
@@ -468,24 +478,40 @@ def _execute_range_mode(
     github_args: dict,
     room_search_mode: str | None = None,
     room_search_value: str | None = None,
+    force_refresh: bool = False,
 ) -> None:
     """Execute processing for a date range."""
     if parsed_start_date is None or parsed_end_date is None:
         raise ValueError("Both start_date and end_date must be provided for range mode")
 
     current = parsed_start_date
+    failed_dates: list[str] = []
     while current <= parsed_end_date:
-        _execute_for_date(
-            date=current,
-            webex_active=webex_active,
-            github_active=github_active,
-            webex_args=webex_args,
-            github_args=github_args,
-            room_search_mode=room_search_mode,
-            room_search_value=room_search_value,
-            apply_date_filter=True,
-        )
+        try:
+            _execute_for_date(
+                date=current,
+                webex_active=webex_active,
+                github_active=github_active,
+                webex_args=webex_args,
+                github_args=github_args,
+                room_search_mode=room_search_mode,
+                room_search_value=room_search_value,
+                apply_date_filter=True,
+                force_refresh=force_refresh,
+            )
+        except Exception as exc:  # noqa: BLE001
+            date_str = current.strftime("%Y-%m-%d")
+            failed_dates.append(date_str)
+            logger.warning(
+                "Failed to process %s, continuing to next date: %s",
+                date_str,
+                exc,
+            )
         current += timedelta(days=1)
+
+    if failed_dates:
+        typer.echo(f"\n⚠ {len(failed_dates)} date(s) failed: {', '.join(failed_dates)}")
+        typer.echo("Re-run with those dates to retry.")
 
 
 def _execute_single_date_mode(
@@ -497,6 +523,7 @@ def _execute_single_date_mode(
     room_search_mode: str | None = None,
     room_search_value: str | None = None,
     apply_date_filter: bool = True,
+    force_refresh: bool = False,
 ) -> None:
     """Execute processing for a single date."""
     if parsed_target_date is None and not room_search_mode:
@@ -511,6 +538,7 @@ def _execute_single_date_mode(
         room_search_mode=room_search_mode,
         room_search_value=room_search_value,
         apply_date_filter=apply_date_filter,
+        force_refresh=force_refresh,
     )
 
 
@@ -524,6 +552,7 @@ def _execute_for_date(
     room_search_mode: str | None = None,
     room_search_value: str | None = None,
     apply_date_filter: bool = True,
+    force_refresh: bool = False,
 ) -> None:
     """Execute processing for a specific date with optional room search."""
     from summarizer.common.console_ui import print_date_header
@@ -539,10 +568,11 @@ def _execute_for_date(
             room_search_mode=room_search_mode,
             room_search_value=room_search_value,
             apply_date_filter=apply_date_filter,
+            force_refresh=force_refresh,
         )
     if github_active:
         gcfg = _build_github_config(date=date, **github_args)
-        _run_github_for_date(gcfg, date_header=False)
+        _run_github_for_date(gcfg, date_header=False, force_refresh=force_refresh)
 
 
 @webex_app.command("login")
@@ -991,6 +1021,19 @@ def main(
     no_github: Annotated[
         bool, typer.Option("--no-github", help="Disable GitHub processing")
     ] = False,
+    no_meetings: Annotated[
+        bool,
+        typer.Option(
+            "--no-meetings", help="Disable Webex meeting transcripts and summaries"
+        ),
+    ] = False,
+    force_refresh: Annotated[
+        bool,
+        typer.Option(
+            "--force-refresh",
+            help="Bypass cache and re-fetch from APIs",
+        ),
+    ] = False,
 ) -> None:
     """Summarizer CLI (unified Webex + GitHub)."""
     # If a subcommand was invoked, don't run the main logic
@@ -1033,6 +1076,7 @@ def main(
         room_chunk_size=room_chunk_size,
         max_messages=max_messages,
         all_messages=all_messages,
+        include_meetings=not no_meetings,
     )
     github_args = _build_github_args(
         github_token=github_token,
@@ -1059,6 +1103,7 @@ def main(
             github_args,
             room_search_mode=room_search_mode,
             room_search_value=room_search_value,
+            force_refresh=force_refresh,
         )
     else:
         _execute_single_date_mode(
@@ -1070,6 +1115,7 @@ def main(
             room_search_mode=room_search_mode,
             room_search_value=room_search_value,
             apply_date_filter=should_apply_date_filter,
+            force_refresh=force_refresh,
         )
 
 

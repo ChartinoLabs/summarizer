@@ -8,7 +8,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from summarizer.common.models import Change, Conversation
+from summarizer.common.models import Change, Conversation, Meeting, MeetingSummary
 
 console = Console()
 
@@ -181,6 +181,175 @@ def display_conversations_summary(
     console.print(f"Total conversation time: [bold yellow]{duration_summary}[/]")
 
 
+# ================================
+# Webex Meetings UI components
+# ================================
+
+
+def _render_meeting_summary(summary: MeetingSummary) -> None:
+    """Render an AI summary sub-panel for a meeting."""
+    summary_parts: list[str] = []
+    if summary.overview:
+        summary_parts.append(f"[bold]Overview:[/] {summary.overview}")
+    if summary.notes:
+        notes = "\n".join(f"  - {n}" for n in summary.notes)
+        summary_parts.append(f"[bold]Notes:[/]\n{notes}")
+    if summary.action_items:
+        items = "\n".join(f"  - {a}" for a in summary.action_items)
+        summary_parts.append(f"[bold]Action Items:[/]\n{items}")
+
+    if summary_parts:
+        console.print(
+            Panel(
+                "\n\n".join(summary_parts),
+                title="AI Summary",
+                style="blue",
+            )
+        )
+
+
+def _render_transcript_snippets(snippets: list, max_lines: int) -> None:
+    """Render a transcript snippet table for a meeting."""
+    table = Table(show_header=True, title="Transcript")
+    table.add_column("Speaker", style="green", no_wrap=True)
+    table.add_column("Text", style="white", no_wrap=False, overflow="fold")
+
+    for snippet in snippets[:max_lines]:
+        table.add_row(snippet.speaker.display_name, snippet.text)
+
+    console.print(table)
+
+    remaining = len(snippets) - max_lines
+    if remaining > 0:
+        console.print(f"  [dim]... and {remaining} more transcript lines[/]")
+
+
+def display_meetings(
+    meetings: list[Meeting],
+    time_display_format: str = "12h",
+    max_transcript_lines: int = 10,
+) -> None:
+    """Display detailed information for each meeting.
+
+    For each meeting, shows a Panel header with metadata, an optional
+    AI summary sub-panel, and an optional transcript table.
+
+    Args:
+        meetings: List of Meeting dataclasses to display
+        time_display_format: "12h" or "24h"
+        max_transcript_lines: Max transcript snippets shown per meeting
+    """
+    if not meetings:
+        console.print("[yellow]No meetings found for this date.[/]")
+        return
+
+    console.print("\n" + "=" * 80)
+    console.print("[bold cyan]Webex Meetings[/]")
+    console.print("=" * 80)
+
+    sorted_meetings = sorted(meetings, key=lambda m: m.start_time)
+
+    for meeting in sorted_meetings:
+        start_fmt = _format_datetime(meeting.start_time, time_display_format)
+        end_fmt = _format_datetime(meeting.end_time, time_display_format)
+        duration = humanize.precisedelta(
+            timedelta(seconds=meeting.duration_seconds), minimum_unit="seconds"
+        )
+        participants_str = (
+            ", ".join(p.display_name for p in meeting.participants)
+            if meeting.participants
+            else "-"
+        )
+
+        header = (
+            f"[bold]{meeting.title}[/]\n"
+            f"[green]Host:[/] {meeting.host.display_name} | "
+            f"[cyan]Start:[/] {start_fmt} | [cyan]End:[/] {end_fmt} | "
+            f"[yellow]Duration:[/] {duration}"
+        )
+        if meeting.participants:
+            header += f"\n[magenta]Participants:[/] {participants_str}"
+
+        console.print(Panel(header, style="bold white"))
+
+        if meeting.summary:
+            _render_meeting_summary(meeting.summary)
+
+        if meeting.transcript_snippets:
+            snippet_label = f"{len(meeting.transcript_snippets)} snippets"
+            if meeting.transcript_vtt:
+                snippet_label += " [dim](full VTT available)[/]"
+            console.print(f"[dim]{snippet_label}[/]")
+            _render_transcript_snippets(
+                meeting.transcript_snippets, max_transcript_lines
+            )
+
+        console.print()  # blank line between meetings
+
+
+def display_meetings_summary(
+    meetings: list[Meeting],
+    time_display_format: str = "12h",
+) -> None:
+    """Display a summary table of all meetings with aggregate statistics.
+
+    Args:
+        meetings: List of Meeting dataclasses
+        time_display_format: "12h" or "24h"
+    """
+    if not meetings:
+        return
+
+    console.print("\n" + "=" * 80)
+    console.print("[bold cyan]Meetings Summary[/]")
+    console.print("=" * 80)
+
+    sorted_meetings = sorted(meetings, key=lambda m: m.start_time)
+
+    table = Table(show_header=True, title="Meeting Overview")
+    table.add_column("Title", style="bold blue", no_wrap=False, overflow="fold")
+    table.add_column("Start", style="cyan", no_wrap=True)
+    table.add_column("End", style="cyan", no_wrap=True)
+    table.add_column("Duration", style="yellow", no_wrap=True)
+    table.add_column("Summary?", style="green", no_wrap=True)
+    table.add_column("Transcript?", style="green", no_wrap=True)
+
+    for meeting in sorted_meetings:
+        start_str = _format_datetime(meeting.start_time, time_display_format)
+        end_str = _format_datetime(meeting.end_time, time_display_format)
+        duration = humanize.precisedelta(
+            timedelta(seconds=meeting.duration_seconds), minimum_unit="seconds"
+        )
+        has_summary = "Yes" if meeting.summary else "No"
+        has_transcript = "Yes" if meeting.transcript_snippets else "No"
+        if meeting.transcript_vtt:
+            has_transcript += " [dim](full VTT)[/]"
+        table.add_row(
+            meeting.title,
+            start_str,
+            end_str,
+            duration,
+            has_summary,
+            has_transcript,
+        )
+
+    console.print(table)
+
+    # Aggregate statistics
+    total_meetings = len(meetings)
+    total_duration = sum(m.duration_seconds for m in meetings)
+    if total_duration > 0:
+        duration_summary = humanize.precisedelta(
+            timedelta(seconds=total_duration), minimum_unit="seconds"
+        )
+    else:
+        duration_summary = "0 seconds"
+
+    console.print("\n[bold]Meeting Statistics:[/]")
+    console.print(f"Total meetings: [bold green]{total_meetings}[/]")
+    console.print(f"Total meeting time: [bold yellow]{duration_summary}[/]")
+
+
 def _format_time(dt: datetime | None, fmt: str) -> str:
     if not dt:
         return "-"
@@ -213,6 +382,12 @@ def print_date_header(date: datetime) -> None:
     console.print("\n" + top, style="bold blue")
     console.print(mid, style="bold white")
     console.print(bot, style="bold blue")
+
+
+def print_cache_indicator(platform: str, fetched_at: datetime | None) -> None:
+    """Print a cache hit indicator with fetch timestamp."""
+    ts = fetched_at.strftime("%Y-%m-%d %H:%M:%S") if fetched_at else "unknown"
+    console.print(f"  [dim italic]{platform} data loaded from cache (fetched {ts})[/]")
 
 
 # =============================
