@@ -1,8 +1,31 @@
-# Summarizer
+# Webex Conversation Summarizer
 
-Summarizes the work a person has done within a given day across multiple applications, or retrieves the complete message history from specific Webex rooms/conversations. All activity data is persisted to a local SQLite database for offline access, historical analysis, and RAG knowledge base construction.
+Summarizes the work a person has done within a given day across multiple applications, or retrieves the complete message history from specific Webex rooms/conversations. All activity data is persisted to a local SQLite database (`~/.config/summarizer/activity.db`) for offline access, historical analysis, and RAG knowledge base construction.
 
 This is useful for asynchronous scrum check-ins, work reporting systems, analyzing conversation history, or building a searchable archive of your professional activity.
+
+## TLDR
+
+```bash
+# One-time: authenticate with Webex OAuth
+uv run summarizer webex login
+
+# Fetch Webex + GitHub activity for a date range (results cached in SQLite)
+uv run summarizer --start-date=2026-03-20 --end-date=2026-03-29
+
+# Webex only, no GitHub
+uv run summarizer --start-date=2026-03-20 --end-date=2026-03-29 --no-github
+
+# Re-fetch from live APIs (bypass cache)
+uv run summarizer --target-date=2026-03-29 --force-refresh
+
+# Retrieve all messages from a specific person's DM
+uv run summarizer --person-name="Andrea Testino"
+```
+
+**What it does:** Connects to the Webex API, fetches your chat messages, meeting transcripts, and (optionally) GitHub activity for the specified date(s). Everything is stored in a local SQLite database. Re-running for the same date loads from cache instead of hitting the API again.
+
+**Requirements:** Python 3.12+, `uv`, Webex OAuth credentials (or legacy token), optionally a GitHub token.
 
 ## Supported Applications
 
@@ -407,6 +430,48 @@ sqlite3 ~/.config/summarizer/activity.db \
    JOIN users u ON mp.user_id = u.id
    GROUP BY m.id
    ORDER BY m.date DESC LIMIT 10"
+```
+
+## Python API (Library Usage)
+
+The Summarizer can be imported and called programmatically from other Python projects, without using the CLI:
+
+```python
+from datetime import datetime
+from summarizer.webex.config import WebexConfig
+from summarizer.webex.runner import WebexRunner
+from summarizer.common.persistence import ActivityStore
+
+# Fetch and cache Webex data for a date
+config = WebexConfig(
+    user_email="you@example.com",
+    target_date=datetime(2026, 3, 29),
+    oauth_client_id="your_client_id",
+    oauth_client_secret="your_client_secret",
+    include_meetings=True,
+)
+runner = WebexRunner(config)
+runner.run(include_meetings=True, force_refresh=False)  # uses cache if available
+
+# Read from the database directly
+store = ActivityStore()  # uses default path ~/.config/summarizer/activity.db
+conversations = store.load_webex_conversations("2026-03-29")
+meetings = store.load_webex_meetings("2026-03-29")
+has_data = store.has_webex_data("2026-03-29")  # check cache
+```
+
+To add as a dependency in another project's `pyproject.toml`:
+
+```toml
+# From git (specific branch)
+dependencies = [
+    "summarizer @ git+https://github.com/ChartinoLabs/summarizer.git@main",
+]
+
+# From local path (development)
+dependencies = [
+    "summarizer @ file:///path/to/Webex-Conv-Summarizer",
+]
 ```
 
 ## Troubleshooting
