@@ -365,6 +365,28 @@ class ActivityStore:
             # Clear existing meetings for this date
             self._clear_meeting_data(cur, date)
 
+            # Defense-in-depth: skip any meeting whose actual start date does
+            # not match the sync's target date. The upstream Webex meetings
+            # API has historically returned extra meetings outside the
+            # requested window (meetingType=meeting ignores from/to filters),
+            # and silently storing those under the sync date would duplicate
+            # them across every subsequent day's sync.
+            filtered_meetings: list[Meeting] = []
+            for meeting in meetings:
+                actual_date = meeting.start_time.date().isoformat()
+                if actual_date != date:
+                    logger.warning(
+                        "Skipping meeting '%s' (id=%s) for date %s — "
+                        "actual start date is %s",
+                        meeting.title,
+                        meeting.id,
+                        date,
+                        actual_date,
+                    )
+                    continue
+                filtered_meetings.append(meeting)
+            meetings = filtered_meetings
+
             for meeting in meetings:
                 # Prefix meeting ID with date to ensure global uniqueness
                 # (recurring meetings share the same series ID across days)

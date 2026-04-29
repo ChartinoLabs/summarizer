@@ -574,13 +574,34 @@ class WebexClient:
         from_str = day_start.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
         to_str = day_end.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
+        # NOTE: Webex's `/v1/meetings?meetingType=meeting` endpoint silently
+        # ignores the `from`/`to` query params (documented behavior — those are
+        # only honored for meetingType=scheduledMeeting). Empirically the
+        # endpoint still needs them present to return any past-meeting window
+        # at all; without them the response is empty. We therefore still send
+        # them, but filter client-side by actual start_time to scope to the
+        # target local day.
         meetings: list[Meeting] = []
+        skipped_out_of_window = 0
         try:
             sdk_meetings = self._client.meetings.list(
                 meetingType="meeting", **{"from": from_str, "to": to_str}
             )
             for m in sdk_meetings:
                 start_dt = datetime.fromisoformat(m.start).astimezone(local_tz)
+                # Drop meetings that don't actually start within the target day
+                if not (day_start <= start_dt < day_end):
+                    skipped_out_of_window += 1
+                    logger.debug(
+                        "Skipping meeting '%s' (id=%s) — start %s outside "
+                        "target window %s to %s",
+                        getattr(m, "title", "(Untitled)"),
+                        getattr(m, "id", ""),
+                        start_dt.isoformat(),
+                        day_start.isoformat(),
+                        day_end.isoformat(),
+                    )
+                    continue
                 end_dt = datetime.fromisoformat(m.end).astimezone(local_tz)
                 duration = int((end_dt - start_dt).total_seconds())
                 host = User(
@@ -604,7 +625,10 @@ class WebexClient:
         except Exception as exc:
             logger.warning("Unexpected error listing meetings: %s", exc)
 
-        logger.info("Found %d meetings for %s", len(meetings), date.date())
+        logger.info(
+            "Found %d meetings for %s (%d returned by API were outside window)",
+            len(meetings), date.date(), skipped_out_of_window,
+        )
         return meetings
 
     def get_meeting_transcripts_for_date(
