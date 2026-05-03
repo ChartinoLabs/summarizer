@@ -23,7 +23,7 @@ class WebexConfig(BaseConfig):
         time_display_format: Literal["12h", "24h"] = "12h",
         room_chunk_size: int = 50,
         max_messages: int = 1000,
-        all_messages: bool = False,
+        all_messages: bool = True,
         include_meetings: bool = True,
     ) -> None:
         """Initialize Webex configuration.
@@ -40,7 +40,10 @@ class WebexConfig(BaseConfig):
             time_display_format: Time format preference
             room_chunk_size: Batch size for room processing
             max_messages: Maximum number of messages to retrieve from a room
-            all_messages: Retrieve all messages regardless of user participation
+            all_messages: Retrieve all messages in active rooms (default True).
+                When False, a room's messages are only retained on dates where
+                the authenticated user personally posted — use only for the
+                legacy reply-assistant workflow.
             include_meetings: Fetch and display meeting transcripts/summaries
         """
         super().__init__(

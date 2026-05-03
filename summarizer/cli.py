@@ -954,9 +954,9 @@ def main(
     all_messages: Annotated[
         bool,
         typer.Option(
-            help="Retrieve ALL messages from room regardless of user participation"
+            help="Retrieve ALL messages in active rooms (default). Use --no-all-messages to restore legacy behavior (room's messages kept only on dates you personally posted)."
         ),
-    ] = False,
+    ] = True,
     # GitHub (all optional; presence of token activates)
     github_token: Annotated[
         str | None,

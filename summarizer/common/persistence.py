@@ -408,7 +408,7 @@ class ActivityStore:
                         summary_raw_json = json.dumps(meeting.summary.raw_json)
 
                 cur.execute(
-                    """INSERT INTO meetings
+                    """INSERT OR IGNORE INTO meetings
                        (id, date, title, start_time, end_time, duration_seconds,
                         host_id, meeting_series_id, site_url, transcript_id,
                         summary_overview, summary_notes, summary_action_items,
@@ -966,6 +966,28 @@ class ActivityStore:
             self._conn.commit()
             logger.info("Cleared %s data for %s", platform or "all", date)
 
+        except Exception:
+            self._conn.rollback()
+            raise
+
+    def clear_date_messages_only(self, date: str) -> None:
+        """Clear chat messages + conversations + webex fetch_log for a date.
+
+        Preserves meetings, transcript_snippets, and meeting_participants.
+        Use this when you want to force-refetch chat traffic (e.g. after a
+        filter change) without losing meeting transcripts and AI summaries
+        that may be unrecoverable from the Webex API after retention expires.
+        """
+        cur = self._conn.cursor()
+        try:
+            cur.execute("BEGIN")
+            self._clear_webex_data(cur, date)
+            cur.execute(
+                "DELETE FROM fetch_log WHERE date = ? AND platform = 'webex'",
+                (date,),
+            )
+            self._conn.commit()
+            logger.info("Cleared Webex chat data for %s (meetings preserved)", date)
         except Exception:
             self._conn.rollback()
             raise
