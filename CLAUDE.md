@@ -165,3 +165,20 @@ Each platform follows the same pattern:
 - Async test support configured via pytest-asyncio
 - Mock HTTP responses using `responses` library
 - Platform-specific test modules mirror source structure
+
+## Persistence Layer
+
+- Default DB: `~/.config/summarizer/activity.db` (SQLite, WAL mode)
+- `ActivityStore.clear_date(date)` wipes everything for a date; `clear_date_messages_only(date)` preserves `meetings`/`transcript_snippets`/`meeting_participants` (often unrecoverable from Webex API after retention expiry — days to weeks).
+- `INSERT OR IGNORE` on both `messages` and `meetings` makes re-fetches idempotent.
+- `fetch_log (date, platform)` drives `has_webex_data()` cache; `force_refresh=True` bypasses it without deleting the row.
+
+## Key Behavior Defaults
+
+- `all_messages` defaults to `True` (since commit 649e8c1). The legacy `False` default silently discarded a room's messages on dates the authenticated user didn't personally post — producing empty group-room data for most days. Only flip to `False` for the narrow "things I said" digest use case.
+- `include_meetings=False` should be set per-date when meetings already exist in the DB for that date, to avoid overwriting preserved transcripts/summaries.
+
+## Gotchas
+
+- Meetings ≠ spaces. `meetings` table has `host_id`; chat spaces are tracked on `messages.space_id`. Don't conflate them when diagnosing "no activity for X".
+- Webex API returns transient 502s from its router gateway on ~1-in-50 fetches; `webexpythonsdk` does not retry these (only 429s). Callers should wrap per-date.
