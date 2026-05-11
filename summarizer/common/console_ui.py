@@ -5,12 +5,25 @@ from datetime import datetime, timedelta
 
 import humanize
 from rich.console import Console
+from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
 
 from summarizer.common.models import Change, Conversation, Meeting, MeetingSummary
 
 console = Console()
+
+
+def _e(value: object) -> str:
+    """Escape user-generated content before Rich renders it.
+
+    Webex messages, display names, and meeting titles routinely contain
+    bracketed substrings like ``[/opt/foo/bar]`` (file paths, log tags,
+    literal Python tracebacks). Rich treats ``[...]`` as markup, so these
+    raise ``rich.errors.MarkupError`` when handed directly to a Panel or
+    Table cell. Always pass user content through this helper first.
+    """
+    return escape(str(value) if value is not None else "")
 
 
 def display_welcome_panel() -> None:
@@ -48,8 +61,8 @@ def display_results(
                 time_str = "-"
             table.add_row(
                 time_str,
-                str(msg.get("space", "-")),
-                str(msg.get("text", "-")),
+                _e(msg.get("space", "-")),
+                _e(msg.get("text", "-")),
             )
 
         console.print(table)
@@ -76,7 +89,7 @@ def display_conversations(
         # Header with stats
         start_fmt = _format_datetime(convo.start_time, time_display_format)
         end_fmt = _format_datetime(convo.end_time, time_display_format)
-        participants = ", ".join([u.display_name for u in convo.participants])
+        participants = ", ".join([_e(u.display_name) for u in convo.participants])
         duration = (
             humanize.precisedelta(
                 timedelta(seconds=convo.duration_seconds), minimum_unit="seconds"
@@ -85,7 +98,7 @@ def display_conversations(
             else "-"
         )
         header = (
-            f"[bold]Conversation {convo.id}[/] | "
+            f"[bold]Conversation {_e(convo.id)}[/] | "
             f"[cyan]{len(convo.messages)} messages[/] | "
             f"[magenta]Participants:[/] {participants} | "
             f"[green]Start:[/] {start_fmt} | [green]End:[/] {end_fmt} | "
@@ -102,8 +115,8 @@ def display_conversations(
         for msg in convo.messages:
             table.add_row(
                 _format_datetime(msg.timestamp, time_display_format),
-                msg.sender.display_name,
-                msg.content,
+                _e(msg.sender.display_name),
+                _e(msg.content),
             )
         console.print(table)
         console.print()  # Blank line between conversations
@@ -136,7 +149,7 @@ def display_conversations_summary(
 
     for convo in sorted_conversations:
         # Format participants as comma-separated list
-        participants = ", ".join([u.display_name for u in convo.participants])
+        participants = ", ".join([_e(u.display_name) for u in convo.participants])
 
         # Format times with dates
         start_time = _format_datetime(convo.start_time, time_display_format)
@@ -151,7 +164,7 @@ def display_conversations_summary(
             duration = "-"
 
         table.add_row(
-            convo.id,
+            _e(convo.id),
             participants,
             start_time,
             end_time,
@@ -190,12 +203,12 @@ def _render_meeting_summary(summary: MeetingSummary) -> None:
     """Render an AI summary sub-panel for a meeting."""
     summary_parts: list[str] = []
     if summary.overview:
-        summary_parts.append(f"[bold]Overview:[/] {summary.overview}")
+        summary_parts.append(f"[bold]Overview:[/] {_e(summary.overview)}")
     if summary.notes:
-        notes = "\n".join(f"  - {n}" for n in summary.notes)
+        notes = "\n".join(f"  - {_e(n)}" for n in summary.notes)
         summary_parts.append(f"[bold]Notes:[/]\n{notes}")
     if summary.action_items:
-        items = "\n".join(f"  - {a}" for a in summary.action_items)
+        items = "\n".join(f"  - {_e(a)}" for a in summary.action_items)
         summary_parts.append(f"[bold]Action Items:[/]\n{items}")
 
     if summary_parts:
@@ -215,7 +228,7 @@ def _render_transcript_snippets(snippets: list, max_lines: int) -> None:
     table.add_column("Text", style="white", no_wrap=False, overflow="fold")
 
     for snippet in snippets[:max_lines]:
-        table.add_row(snippet.speaker.display_name, snippet.text)
+        table.add_row(_e(snippet.speaker.display_name), _e(snippet.text))
 
     console.print(table)
 
@@ -256,14 +269,14 @@ def display_meetings(
             timedelta(seconds=meeting.duration_seconds), minimum_unit="seconds"
         )
         participants_str = (
-            ", ".join(p.display_name for p in meeting.participants)
+            ", ".join(_e(p.display_name) for p in meeting.participants)
             if meeting.participants
             else "-"
         )
 
         header = (
-            f"[bold]{meeting.title}[/]\n"
-            f"[green]Host:[/] {meeting.host.display_name} | "
+            f"[bold]{_e(meeting.title)}[/]\n"
+            f"[green]Host:[/] {_e(meeting.host.display_name)} | "
             f"[cyan]Start:[/] {start_fmt} | [cyan]End:[/] {end_fmt} | "
             f"[yellow]Duration:[/] {duration}"
         )
@@ -325,7 +338,7 @@ def display_meetings_summary(
         if meeting.transcript_vtt:
             has_transcript += " [dim](full VTT)[/]"
         table.add_row(
-            meeting.title,
+            _e(meeting.title),
             start_str,
             end_str,
             duration,
@@ -415,7 +428,7 @@ def display_changes(
 
     for ch in sorted_changes:
         time_str = _format_time(ch.timestamp, time_display_format)
-        table.add_row(time_str, ch.type.value, ch.repo_full_name, ch.title)
+        table.add_row(time_str, ch.type.value, _e(ch.repo_full_name), _e(ch.title))
 
     console.print(table)
 
