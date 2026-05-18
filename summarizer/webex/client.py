@@ -267,6 +267,18 @@ class WebexClient:
         """Get all messages for the given rooms and date."""
         messages: list[Message] = []
         seen_message_ids: set[str] = set()  # Track seen message IDs
+
+        # Compute the end-of-day boundary once for all rooms. Using before= tells
+        # the Webex API to start pagination at the end of the target day rather than
+        # at "now", eliminating months of backward pagination per room.
+        # Pattern mirrors get_meetings_for_date() in this same file.
+        day_start = datetime(date.year, date.month, date.day, tzinfo=local_tz)
+        before_iso = (
+            (day_start + timedelta(days=1))
+            .astimezone(UTC)
+            .strftime("%Y-%m-%dT%H:%M:%SZ")
+        )
+
         with Progress(
             SpinnerColumn(),
             TextColumn("[bold blue]Fetching messages from active rooms..."),
@@ -288,6 +300,7 @@ class WebexClient:
                         room,
                         local_tz,
                         all_messages_flag,
+                        before_iso,
                     ): room
                     for room in rooms
                 }
@@ -1004,17 +1017,25 @@ def get_messages(
     room: Room,
     local_tz: tzinfo,
     all_messages_flag: bool = False,
+    before: str | None = None,
 ) -> MessageAnalysisResult:
     """Get all messages for a specific date in a room.
 
     Only returns messages if the user sent at least one message in that room on that
     date, unless all_messages_flag is True which returns all messages regardless.
+
+    Args:
+        before: ISO8601 UTC timestamp (e.g. "2025-09-02T04:00:00Z"). When provided,
+                pagination starts at this point rather than at the current time,
+                eliminating months of backward pagination for historical dates.
     """
     all_messages: list[Message] = []
     user_sent = False
     had_activity_on_or_after_date = False
 
-    messages: Generator[SDKMessage, None, None] = client.messages.list(roomId=room.id)
+    messages: Generator[SDKMessage, None, None] = client.messages.list(
+        roomId=room.id, before=before
+    )
     last_activity: datetime | None = None
 
     for sdk_message in messages:
