@@ -276,7 +276,7 @@ class WebexClient:
         before_iso = (
             (day_start + timedelta(days=1))
             .astimezone(UTC)
-            .strftime("%Y-%m-%dT%H:%M:%SZ")
+            .strftime("%Y-%m-%dT%H:%M:%S.000Z")  # Webex requires milliseconds in before=
         )
 
         with Progress(
