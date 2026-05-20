@@ -21,7 +21,7 @@ class WebexConfig(BaseConfig):
         context_window_minutes: int = 15,
         passive_participation: bool = False,
         time_display_format: Literal["12h", "24h"] = "12h",
-        room_chunk_size: int = 50,
+        room_chunk_size: int = 1000,
         max_messages: int = 1000,
         all_messages: bool = True,
         include_meetings: bool = True,
